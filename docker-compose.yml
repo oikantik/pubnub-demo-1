@@ -9,6 +9,9 @@ services:
       - ./api:/app
     env_file:
       - .env
+    depends_on:
+      - postgres
+      - redis
 
   frontend:
     build:
@@ -23,3 +26,25 @@ services:
       - .env
     depends_on:
       - api
+
+  postgres:
+    image: postgres:16-alpine
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: chat_development
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+volumes:
+  postgres_data:
+  redis_data:

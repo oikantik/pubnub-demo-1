@@ -1,56 +1,71 @@
 # frozen_string_literal: true
 
 require 'grape'
-require 'chat/services/pubnub'
-require 'chat/models/message'
-require 'securerandom'
 
 module Chat::REST
   class Messages < Grape::API
+    version 'v1', using: :path
     format :json
 
-    @pubnub_service = Chat::Services::PubnubService.new
-
-    class << self
-      attr_reader :pubnub_service
-    end
+    helpers Chat::REST::Helpers
 
     resource :messages do
+      before do
+        authenticate!
+      end
+
       desc 'Send a message to a channel'
       params do
-        requires :channel, type: String, desc: 'Channel to publish to'
-        requires :message, type: String, desc: 'Message content'
-        optional :sender, type: String, desc: 'Message sender'
+        requires :channel_id, type: String, desc: 'Channel ID'
+        requires :message, type: String, desc: 'Message text'
       end
       post do
-        sender = params[:sender] || 'anonymous'
+        channel = Chat::Models::Channel[params[:channel_id]]
+        error!('Channel not found', 404) unless channel
 
-        message = Chat::Models::Message.new(
-          message: params[:message],
-          sender: sender,
-          channel: params[:channel]
+        # Check if user is a member of the channel
+        is_member = Chat::Services::Operations::Channel.is_member?(channel, current_user)
+        error!('You are not a member of this channel', 403) unless is_member
+
+        # Create message
+        begin
+          message = Chat::Services::Operations::Message.create_in_channel(
+            params[:message],
+            current_user,
+            channel
+          )
+
+          # Return message
+          Chat::REST::Representers::Message.new(message).to_hash
+        rescue => e
+          error!(e.message, 400)
+        end
+      end
+
+      desc 'Get messages from a channel'
+      params do
+        requires :channel_id, type: String, desc: 'Channel ID'
+        optional :before, type: Integer, desc: 'Get messages before this timestamp'
+        optional :limit, type: Integer, default: 50, desc: 'Number of messages to return'
+      end
+      get do
+        channel = Chat::Models::Channel[params[:channel_id]]
+        error!('Channel not found', 404) unless channel
+
+        # Check if user is a member of the channel
+        is_member = Chat::Services::Operations::Channel.is_member?(channel, current_user)
+        error!('You are not a member of this channel', 403) unless is_member
+
+        # Get messages
+        messages = Chat::Services::Operations::Message.get_channel_messages(
+          channel,
+          params[:before],
+          params[:limit]
         )
 
-        Messages.pubnub_service.publish(params[:channel], message.to_h)
-
-        { success: true, message: message.to_h }
-      end
-
-      desc 'Get history of a channel (mock - would use PubNub history in production)'
-      params do
-        requires :channel, type: String, desc: 'Channel to get history from'
-      end
-      get ':channel/history' do
-        # In a real application, you would use PubNub's history API
-        # This is just a mock that returns a dummy message
-        [
-          Chat::Models::Message.new(
-            message: 'Welcome to the chat!',
-            sender: 'system',
-            channel: params[:channel],
-            timestamp: Time.now.to_i - 3600
-          ).to_h
-        ]
+        messages.map do |message|
+          Chat::REST::Representers::Message.new(message, include_sender: true).to_hash
+        end
       end
     end
   end

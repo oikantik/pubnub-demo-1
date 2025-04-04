@@ -1,0 +1,38 @@
+# frozen_string_literal: true
+require_relative 'boot'
+require 'sequel'
+
+namespace :db do
+  desc 'Run migrations'
+  task :migrate do
+    Sequel.extension :migration
+    Sequel::Migrator.run(Chat::DB, File.join(BASE_PATH, 'db', 'migrations'))
+    puts 'Migrations ran successfully'
+  end
+
+  desc 'Create a new migration file'
+  task :create_migration, [:name] do |_t, args|
+    name = args[:name]
+    abort('You must specify a migration name') if name.nil?
+
+    timestamp = Time.now.strftime('%Y%m%d%H%M%S')
+    filename = File.join(BASE_PATH, 'db', 'migrations', "#{timestamp}_#{name}.rb")
+
+    File.open(filename, 'w') do |file|
+      file.write <<~MIGRATION
+        # frozen_string_literal: true
+        Sequel.migration do
+          up do
+            # Add migration code here
+          end
+
+          down do
+            # Add rollback code here
+          end
+        end
+      MIGRATION
+    end
+
+    puts "Created migration: #{filename}"
+  end
+end
