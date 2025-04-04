@@ -4,10 +4,10 @@ require 'grape'
 
 module Chat::REST
   class Messages < Grape::API
+    helpers Chat::REST::Helpers
+
     format :json
     version 'v1', using: :path
-
-    helpers Chat::REST::Helpers
 
     resource :messages do
       before do

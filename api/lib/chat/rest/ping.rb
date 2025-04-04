@@ -5,8 +5,7 @@ require 'grape'
 module Chat::REST
   class Ping < Grape::API
     format :json
-
-    helpers Chat::REST::Helpers
+    version 'v1', using: :path
 
     desc 'Ping the API'
     get :ping do

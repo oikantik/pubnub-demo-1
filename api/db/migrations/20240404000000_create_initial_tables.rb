@@ -1,7 +1,8 @@
 # frozen_string_literal: true
 Sequel.migration do
   up do
-    extension :pg_uuid
+    # Create UUID extension
+    run 'CREATE EXTENSION IF NOT EXISTS "uuid-ossp"'
 
     create_table(:users) do
       uuid :id, primary_key: true, default: Sequel.function(:uuid_generate_v4)
@@ -36,13 +37,10 @@ Sequel.migration do
       uuid :channel_id, null: false
       foreign_key [:sender_id], :users
       foreign_key [:channel_id], :channels, on_delete: :cascade
-      Integer :timestamp, null: false, default: Sequel.function(:extract, :epoch, Sequel.function(:now))
+      Integer :timestamp, null: false
       DateTime :created_at, null: false, default: Sequel.function(:now)
       DateTime :updated_at, null: false, default: Sequel.function(:now)
     end
-
-    # Enable UUID extension
-    run 'CREATE EXTENSION IF NOT EXISTS "uuid-ossp"'
 
     # Add indexes
     add_index :users, :name

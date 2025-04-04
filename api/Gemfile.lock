@@ -62,6 +62,9 @@ GEM
       mustermann-grape (~> 1.0.0)
       rack (>= 1.3.0)
       rack-accept
+    grape-entity (1.0.1)
+      activesupport (>= 3.0.0)
+      multi_json (>= 1.3.2)
     grape-roar (0.4.1)
       grape
       multi_json
@@ -137,10 +140,11 @@ DEPENDENCIES
   activesupport (~> 7.1)
   bcrypt (~> 3.1)
   grape (~> 2.0)
+  grape-entity (~> 1.0.0)
   grape-roar (~> 0.4.0)
   grape-swagger (~> 2.0.0)
   grape_logging (~> 1.8)
-  pg
+  pg (~> 1.5)
   pubnub (~> 5.2)
   rack (~> 3.1)
   rack-cors (~> 2.0)
@@ -148,8 +152,8 @@ DEPENDENCIES
   rake (~> 13.0)
   redis (~> 5.0)
   roar (~> 1.1)
-  sequel
-  sequel_pg
+  sequel (~> 5.74)
+  sequel_pg (~> 1.17)
 
 BUNDLED WITH
    2.4.14

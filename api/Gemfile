@@ -8,14 +8,15 @@ gem "grape", "~> 2.0"
 gem "grape-roar", "~> 0.4.0"
 gem "grape_logging", "~> 1.8"
 gem "grape-swagger", "~> 2.0.0"
+gem "grape-entity", "~> 1.0.0"
 gem "roar", "~> 1.1"
 gem "redis", "~> 5.0"
 gem "activesupport", "~> 7.1"
 gem "pubnub", "~> 5.2"
 gem "rack-cors", "~> 2.0"
-gem 'pg'
-gem 'sequel'
-gem 'sequel_pg'
+gem "pg", "~> 1.5"
+gem "sequel", "~> 5.74"
+gem "sequel_pg", "~> 1.17"
 gem "bcrypt", "~> 3.1"
 gem "rake", "~> 13.0"
 

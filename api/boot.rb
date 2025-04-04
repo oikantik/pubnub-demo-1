@@ -21,32 +21,12 @@ DB = Sequel.connect(
   database: ENV['POSTGRES_DB']
 )
 
-# Load main module which will load all components
+# Run migrations before loading models
+Sequel.extension :migration
+Sequel::Migrator.run(DB, File.join(BASE_PATH, 'db', 'migrations'))
+
+# Load the main Chat module which includes all components
 require 'chat'
 
-# Load models first
-require 'chat/models/user'
-require 'chat/models/channel'
-require 'chat/models/message'
-
-# Then services
-require 'chat/services/redis'
-require 'chat/services/pubnub'
-
-# Then operations
-require 'chat/services/operations/user'
-require 'chat/services/operations/channel'
-require 'chat/services/operations/message'
-
-# Then representers
-require 'chat/rest/representers/user'
-require 'chat/rest/representers/channel'
-require 'chat/rest/representers/message'
-
-# Finally REST endpoints
-require 'chat/rest'
-require 'chat/rest/ping'
-require 'chat/rest/users'
-require 'chat/rest/channels'
-require 'chat/rest/messages'
-require 'chat/rest/tokens'
+# We're not loading models or other components here
+# They will be loaded after migrations in the application startup

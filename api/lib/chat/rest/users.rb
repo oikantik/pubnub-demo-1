@@ -4,10 +4,11 @@ require 'grape'
 
 module Chat::REST
   class Users < Grape::API
+    helpers Chat::REST::Helpers
+
     format :json
     version 'v1', using: :path
-
-    helpers Chat::REST::Helpers
+    content_type :json, "application/json"
 
     resource :users do
       desc 'Login or create a user'

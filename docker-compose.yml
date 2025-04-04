@@ -10,8 +10,10 @@ services:
     env_file:
       - .env
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
   frontend:
     build:
@@ -37,6 +39,14 @@ services:
       POSTGRES_DB: chat_development
     ports:
       - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    # Initialize PostgreSQL with the UUID extension
+    command: postgres -c 'shared_preload_libraries=pg_stat_statements' -c 'pg_stat_statements.track=all' -c 'pg_stat_statements.max=10000' -c 'track_activity_query_size=2048'
 
   redis:
     image: redis:7-alpine
@@ -44,6 +54,12 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
 
 volumes:
   postgres_data:

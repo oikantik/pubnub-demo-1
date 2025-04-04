@@ -4,10 +4,10 @@ require 'grape'
 
 module Chat::REST
   class Tokens < Grape::API
-    version 'v1', using: :path
-    format :json
-
     helpers Chat::REST::Helpers
+
+    format :json
+    version 'v1', using: :path
 
     resource :tokens do
       before do

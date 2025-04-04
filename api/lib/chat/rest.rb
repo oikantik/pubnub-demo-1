@@ -3,11 +3,6 @@
 require 'grape'
 require 'grape/roar/formatter'
 require 'grape-swagger'
-require 'chat/rest/ping'
-require 'chat/rest/users'
-require 'chat/rest/channels'
-require 'chat/rest/messages'
-require 'chat/rest/tokens'
 
 module Chat::REST
   module Helpers
@@ -33,7 +28,16 @@ module Chat::REST
       collection.map { |item| present_with(item, representer_class, options) }
     end
   end
+end
 
+# Load REST endpoints before mounting them
+require 'chat/rest/ping'
+require 'chat/rest/users'
+require 'chat/rest/channels'
+require 'chat/rest/messages'
+require 'chat/rest/tokens'
+
+module Chat::REST
   class Root < Grape::API
     content_type :json, 'application/json'
     formatter :json, Grape::Formatter::Roar
@@ -55,10 +59,3 @@ module Chat::REST
     )
   end
 end
-
-# Load REST endpoints
-require 'chat/rest/ping'
-require 'chat/rest/users'
-require 'chat/rest/channels'
-require 'chat/rest/messages'
-require 'chat/rest/tokens'
