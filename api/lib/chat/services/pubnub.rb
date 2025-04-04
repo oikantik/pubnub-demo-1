@@ -21,20 +21,29 @@ module Chat
       def initialize
         # Log environment variables (redact sensitive parts)
         puts "PubNub initialized with keys:"
-        puts "  Subscribe Key: #{ENV['PUBNUB_SUBSCRIBE_KEY'] ? 'Configured' : 'Missing'}"
-        puts "  Publish Key: #{ENV['PUBNUB_PUBLISH_KEY'] ? 'Configured' : 'Missing'}"
-        puts "  Secret Key: #{ENV['PUBNUB_SECRET_KEY'] ? 'Configured' : 'Missing'}"
+        puts "  Subscribe Key: #{ENV['PUBNUB_SUBSCRIBE_KEY'] ? ENV['PUBNUB_SUBSCRIBE_KEY'][0..5] + '...' : 'Missing'}"
+        puts "  Publish Key: #{ENV['PUBNUB_PUBLISH_KEY'] ? ENV['PUBNUB_PUBLISH_KEY'][0..5] + '...' : 'Missing'}"
+        puts "  Secret Key: #{ENV['PUBNUB_SECRET_KEY'] ? 'Configured (Hidden)' : 'Missing'}"
       end
 
       # @return [::Pubnub] PubNub admin client with full permissions
       def admin_client
-        @admin_client ||= ::Pubnub.new(
-          subscribe_key: ENV['PUBNUB_SUBSCRIBE_KEY'],
-          publish_key: ENV['PUBNUB_PUBLISH_KEY'],
-          secret_key: ENV['PUBNUB_SECRET_KEY'],
-          uuid: 'server-admin',
-          ssl: true
-        )
+        @admin_client ||= begin
+          puts "Creating PubNub admin client with keys"
+          client = ::Pubnub.new(
+            subscribe_key: ENV['PUBNUB_SUBSCRIBE_KEY'],
+            publish_key: ENV['PUBNUB_PUBLISH_KEY'],
+            secret_key: ENV['PUBNUB_SECRET_KEY'],
+            uuid: 'server-admin',
+            ssl: true
+          )
+          puts "PubNub admin client created successfully"
+          client
+        end
+      rescue => e
+        puts "Error creating PubNub admin client: #{e.class.name} - #{e.message}"
+        puts e.backtrace.join("\n")
+        nil
       end
 
       # Get PubNub client for a specific user's auth token
@@ -58,6 +67,10 @@ module Chat
           auth: token,
           ssl: true
         )
+      rescue => e
+        puts "Error creating PubNub client for user: #{e.class.name} - #{e.message}"
+        puts e.backtrace.join("\n")
+        admin_client
       end
 
       # Publish a message to a channel
@@ -189,16 +202,26 @@ module Chat
         # Get channel resources with permissions
         puts "Building resources for user #{user_id}"
         resources = token_resources_for_user(user)
+        puts "Resources for token: #{resources.inspect}"
 
         # Verify PubNub keys are available
         unless ENV['PUBNUB_SUBSCRIBE_KEY'] && ENV['PUBNUB_PUBLISH_KEY'] && ENV['PUBNUB_SECRET_KEY']
           puts "Error: Missing PubNub keys in environment"
+          puts "  Subscribe Key: #{ENV['PUBNUB_SUBSCRIBE_KEY'] ? 'Present' : 'Missing'}"
+          puts "  Publish Key: #{ENV['PUBNUB_PUBLISH_KEY'] ? 'Present' : 'Missing'}"
+          puts "  Secret Key: #{ENV['PUBNUB_SECRET_KEY'] ? 'Present' : 'Missing'}"
           return nil
         end
 
         # Create token with permissions using PAMv3
         puts "Requesting token from PubNub for user #{user_id}"
         begin
+          # First verify admin client is available
+          unless admin_client
+            puts "Error: PubNub admin client is not available"
+            return nil
+          end
+
           token_request = admin_client.grant_token(
             ttl: DEFAULT_TTL,
             resources: resources,
@@ -207,7 +230,11 @@ module Chat
           )
 
           # Process result
-          result = token_request.result
+          result = token_request&.result
+          status = token_request&.status
+
+          # Debug the status and result
+          puts "PubNub token request status: #{status.inspect}"
 
           if result && result[:token]
             puts "Successfully received token from PubNub for user #{user_id}"
@@ -217,8 +244,9 @@ module Chat
             Chat::Services::Redis.set_user_token(user_id, result[:token], DEFAULT_TTL)
             result[:token]
           else
-            puts "Error generating token for user #{user_id}: #{token_request.status[:error].inspect}"
-            puts "Status: #{token_request.status.inspect}"
+            error_details = status && status[:error] ? status[:error].inspect : 'Unknown error'
+            puts "Error generating token for user #{user_id}: #{error_details}"
+            puts "Status: #{status.inspect}"
             nil
           end
         rescue => e
@@ -242,20 +270,30 @@ module Chat
         channels = user_channels.map { |c| c.id.to_s }
         puts "User #{user.id} has access to channels: #{channels.join(', ')}"
 
-        # Initialize resources structure
+        # Add a global resource to allow access to all channels
+        # This is a simplification for the demo, in production you would be more restrictive
         resources = {
-          channels: {},
+          channels: {
+            # Allow access to all channels for demo purposes
+            '*': {
+              read: true,
+              write: true,
+              get: true,
+              update: true,
+              join: true
+            }
+          },
           channel_groups: {},
           uuids: {
             # Add permission for the user's own UUID
             user.id.to_s => {
               update: true,
-              delete: false
+              get: true
             }
           }
         }
 
-        # Add channel permissions
+        # Add specific channel permissions (in addition to the wildcard)
         channels.each do |channel|
           # Main channel - all permissions
           resources[:channels][channel] = {

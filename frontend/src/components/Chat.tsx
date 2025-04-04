@@ -11,6 +11,7 @@ interface Message {
   sender: string;
   timestamp: number;
   channel?: string;
+  channel_id?: string;
   id?: string;
 }
 
@@ -28,7 +29,10 @@ const Chat: React.FC<ChatProps> = ({ userId, authToken }) => {
   const pubnub = usePubNub();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
-  const [currentChannel, setCurrentChannel] = useState<string | null>(null);
+  const [currentChannelId, setCurrentChannelId] = useState<string | null>(null);
+  const [currentChannelName, setCurrentChannelName] = useState<string | null>(
+    null
+  );
   const [channels, setChannels] = useState<Channel[]>([]);
   const [newChannelName, setNewChannelName] = useState("");
   const [isSubscribed, setIsSubscribed] = useState(false);
@@ -48,8 +52,9 @@ const Chat: React.FC<ChatProps> = ({ userId, authToken }) => {
           setChannels(channelList);
 
           // Auto-select first channel if available
-          if (channelList.length > 0 && !currentChannel) {
-            setCurrentChannel(channelList[0].name);
+          if (channelList.length > 0 && !currentChannelId) {
+            setCurrentChannelId(channelList[0].id);
+            setCurrentChannelName(channelList[0].name);
           }
         }
       } catch (error) {
@@ -60,24 +65,25 @@ const Chat: React.FC<ChatProps> = ({ userId, authToken }) => {
     if (authToken) {
       fetchChannels();
     }
-  }, [authToken, currentChannel]);
+  }, [authToken, currentChannelId]);
 
   // Subscribe to the channel
   const subscribeToChannel = useCallback(() => {
-    if (!isSubscribed && currentChannel) {
+    if (!isSubscribed && currentChannelId) {
+      console.log(`Subscribing to channel: ${currentChannelId}`);
       pubnub.subscribe({
-        channels: [currentChannel, TOKEN_UPDATES],
+        channels: [currentChannelId, TOKEN_UPDATES],
       });
       setIsSubscribed(true);
     }
-  }, [pubnub, currentChannel, isSubscribed]);
+  }, [pubnub, currentChannelId, isSubscribed]);
 
   // Setup PubNub listeners
   const setupListeners = useCallback(() => {
     const listener = {
       message: (event: any) => {
         // Handle regular messages
-        if (event.channel === currentChannel) {
+        if (event.channel === currentChannelId) {
           const message = event.message as Message;
           setMessages((messages) => [...messages, message]);
         }
@@ -104,23 +110,24 @@ const Chat: React.FC<ChatProps> = ({ userId, authToken }) => {
       pubnub.removeListener(listener);
       if (isSubscribed) {
         pubnub.unsubscribe({
-          channels: [currentChannel || "", TOKEN_UPDATES],
+          channels: [currentChannelId || "", TOKEN_UPDATES],
         });
         setIsSubscribed(false);
       }
     };
-  }, [pubnub, currentChannel, isSubscribed]);
+  }, [pubnub, currentChannelId, isSubscribed]);
 
   // Setup subscriptions and listeners when PubNub is ready
   useEffect(() => {
-    if (pubnub && pubnub.getUUID() && currentChannel) {
+    if (pubnub && pubnub.getUUID() && currentChannelId) {
       subscribeToChannel();
       const cleanup = setupListeners();
 
       const fetchHistory = async () => {
         try {
+          console.log(`Fetching history for channel ID: ${currentChannelId}`);
           const response = await fetch(
-            `${API_URL}/v1/${currentChannel}/history`,
+            `${API_URL}/v1/channels/${currentChannelId}/history`,
             {
               headers: {
                 Authorization: `Bearer ${authToken}`,
@@ -130,8 +137,12 @@ const Chat: React.FC<ChatProps> = ({ userId, authToken }) => {
 
           if (response.ok) {
             const history = await response.json();
+            console.log(`Received ${history.length} messages from history`);
             setMessages(history);
           } else {
+            console.error(
+              `Error fetching history: ${response.status} ${response.statusText}`
+            );
             setMessages([]);
           }
         } catch (error) {
@@ -144,13 +155,14 @@ const Chat: React.FC<ChatProps> = ({ userId, authToken }) => {
 
       return cleanup;
     }
-  }, [pubnub, subscribeToChannel, setupListeners, currentChannel, authToken]);
+  }, [pubnub, subscribeToChannel, setupListeners, currentChannelId, authToken]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input || !currentChannel) return;
+    if (!input || !currentChannelId) return;
 
     try {
+      console.log(`Sending message to channel ID: ${currentChannelId}`);
       await fetch(`${API_URL}/v1/messages`, {
         method: "POST",
         headers: {
@@ -158,7 +170,7 @@ const Chat: React.FC<ChatProps> = ({ userId, authToken }) => {
           Authorization: `Bearer ${authToken}`,
         },
         body: JSON.stringify({
-          channel_id: currentChannel,
+          channel_id: currentChannelId,
           text: input,
         }),
       });
@@ -188,7 +200,8 @@ const Chat: React.FC<ChatProps> = ({ userId, authToken }) => {
       if (response.ok) {
         const channel = await response.json();
         setChannels([...channels, channel]);
-        setCurrentChannel(channel.name);
+        setCurrentChannelId(channel.id);
+        setCurrentChannelName(channel.name);
         setNewChannelName("");
       }
     } catch (error) {
@@ -196,19 +209,20 @@ const Chat: React.FC<ChatProps> = ({ userId, authToken }) => {
     }
   };
 
-  const handleChannelSelect = (channelName: string) => {
-    if (channelName === currentChannel) return;
+  const handleChannelSelect = (channel: Channel) => {
+    if (channel.id === currentChannelId) return;
 
     // Unsubscribe from current channel
-    if (isSubscribed && currentChannel) {
+    if (isSubscribed && currentChannelId) {
       pubnub.unsubscribe({
-        channels: [currentChannel],
+        channels: [currentChannelId],
       });
       setIsSubscribed(false);
     }
 
     // Set new channel and let the effect handle subscription
-    setCurrentChannel(channelName);
+    setCurrentChannelId(channel.id);
+    setCurrentChannelName(channel.name);
     setMessages([]);
   };
 
@@ -220,8 +234,8 @@ const Chat: React.FC<ChatProps> = ({ userId, authToken }) => {
           {channels.map((channel) => (
             <li
               key={channel.id}
-              className={currentChannel === channel.name ? "active" : ""}
-              onClick={() => handleChannelSelect(channel.name)}
+              className={currentChannelId === channel.id ? "active" : ""}
+              onClick={() => handleChannelSelect(channel)}
             >
               {channel.name}
             </li>
@@ -239,9 +253,9 @@ const Chat: React.FC<ChatProps> = ({ userId, authToken }) => {
       </div>
 
       <div className="messages-section">
-        <h2>{currentChannel || "Select a channel"}</h2>
+        <h2>{currentChannelName || "Select a channel"}</h2>
         <div className="messages">
-          {!currentChannel ? (
+          {!currentChannelId ? (
             <p className="no-channel">Please select or create a channel</p>
           ) : messages.length === 0 ? (
             <p className="no-messages">
@@ -255,30 +269,28 @@ const Chat: React.FC<ChatProps> = ({ userId, authToken }) => {
                   msg.sender === userId ? "sent" : "received"
                 }`}
               >
-                <span className="sender">
-                  {msg.sender === userId ? "You" : msg.sender}
-                </span>
-                <p>{msg.message}</p>
-                <span className="timestamp">
-                  {new Date(msg.timestamp * 1000).toLocaleTimeString()}
-                </span>
+                <div className="message-content">
+                  <p>{msg.message}</p>
+                  <div className="message-meta">
+                    <span className="sender">{msg.sender}</span>
+                    <span className="timestamp">
+                      {new Date(msg.timestamp * 1000).toLocaleTimeString()}
+                    </span>
+                  </div>
+                </div>
               </div>
             ))
           )}
         </div>
-
-        {currentChannel && (
+        {currentChannelId && (
           <form onSubmit={handleSubmit} className="message-form">
             <input
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder="Type a message..."
-              disabled={!currentChannel}
             />
-            <button type="submit" disabled={!currentChannel}>
-              Send
-            </button>
+            <button type="submit">Send</button>
           </form>
         )}
       </div>
