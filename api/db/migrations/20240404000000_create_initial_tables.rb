@@ -16,9 +16,17 @@ Sequel.migration do
       Text :description
       uuid :created_by, null: false
       foreign_key [:created_by], :users
-      column :member_ids, 'uuid[]', default: Sequel.lit("'{}'::uuid[]")
       DateTime :created_at, null: false, default: Sequel.function(:now)
       DateTime :updated_at, null: false, default: Sequel.function(:now)
+    end
+
+    create_table(:user_channels) do
+      primary_key [:user_id, :channel_id]
+      uuid :user_id, null: false
+      uuid :channel_id, null: false
+      foreign_key [:user_id], :users
+      foreign_key [:channel_id], :channels, on_delete: :cascade
+      DateTime :joined_at, null: false, default: Sequel.function(:now)
     end
 
     create_table(:messages) do
@@ -42,11 +50,13 @@ Sequel.migration do
     add_index :messages, :channel_id
     add_index :messages, :sender_id
     add_index :messages, :timestamp
-    add_index :channels, :member_ids, type: :gin
+    add_index :user_channels, :user_id
+    add_index :user_channels, :channel_id
   end
 
   down do
     drop_table(:messages)
+    drop_table(:user_channels)
     drop_table(:channels)
     drop_table(:users)
   end

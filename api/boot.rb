@@ -6,6 +6,7 @@ require 'sequel'
 require 'securerandom'
 require 'json'
 require 'roar/json'
+require 'grape-swagger'
 
 # Setup Redis client
 REDIS = Redis.new(url: ENV['REDIS_URL'])
@@ -20,8 +21,10 @@ DB = Sequel.connect(
   database: ENV['POSTGRES_DB']
 )
 
-# Load models first
+# Load main module which will load all components
 require 'chat'
+
+# Load models first
 require 'chat/models/user'
 require 'chat/models/channel'
 require 'chat/models/message'

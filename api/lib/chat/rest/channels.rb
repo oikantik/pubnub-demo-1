@@ -4,8 +4,8 @@ require 'grape'
 
 module Chat::REST
   class Channels < Grape::API
-    version 'v1', using: :path
     format :json
+    version 'v1', using: :path
 
     helpers Chat::REST::Helpers
 
@@ -20,7 +20,7 @@ module Chat::REST
         optional :description, type: String, desc: 'Channel description'
       end
       post do
-        channel = Chat::Services::Operations::Channel.create_with_creator(
+        channel = Chat::Services::Channel.create_with_creator(
           {
             name: params[:name],
             description: params[:description]
@@ -28,17 +28,7 @@ module Chat::REST
           current_user
         )
 
-        # Publish channel creation to PubNub
-        pubnub_service = Chat::Services::Pubnub.new
-        pubnub_service.publish(
-          'channel-updates',
-          {
-            action: 'create',
-            channel: Chat::REST::Representers::Channel.new(channel).to_hash
-          }
-        )
-
-        Chat::REST::Representers::Channel.new(channel).to_hash
+        present_with(channel, Chat::REST::Representers::Channel)
       end
 
       desc 'Join a channel'
@@ -50,9 +40,9 @@ module Chat::REST
         error!('Channel not found', 404) unless channel
 
         # Add user to channel
-        Chat::Services::Operations::Channel.add_member(channel, current_user)
+        Chat::Services::Channel.add_member(channel, current_user)
 
-        { success: true }
+        present_with(Object.new, Chat::REST::Representers::Success, message: 'Joined channel successfully')
       end
 
       desc 'Get channel details'
@@ -64,22 +54,17 @@ module Chat::REST
         error!('Channel not found', 404) unless channel
 
         # Check if user is a member
-        is_member = Chat::Services::Operations::Channel.is_member?(channel, current_user)
+        is_member = Chat::Services::Channel.is_member?(channel, current_user)
         error!('You are not a member of this channel', 403) unless is_member
 
-        Chat::REST::Representers::Channel.new(channel, include_members: true).to_hash
+        present_with(channel, Chat::REST::Representers::Channel, include_members: true)
       end
 
-      desc 'List all channels for a user'
+      desc 'List all channels for the current user'
       get do
-        # Find all channels where current user is a member
-        channels = Chat::Models::Channel.where(
-          Sequel.lit("member_ids @> ARRAY[?]::uuid[]", current_user.id)
-        ).all
+        channels = Chat::Services::Channel.get_user_channels(current_user)
 
-        channels.map do |channel|
-          Chat::REST::Representers::Channel.new(channel).to_hash
-        end
+        present_collection_with(channels, Chat::REST::Representers::Channel)
       end
     end
   end

@@ -2,10 +2,11 @@
 
 require 'grape'
 require 'grape/roar/formatter'
+require 'grape-swagger'
 require 'chat/rest/ping'
-require 'chat/rest/messages'
 require 'chat/rest/users'
 require 'chat/rest/channels'
+require 'chat/rest/messages'
 require 'chat/rest/tokens'
 
 module Chat::REST
@@ -23,6 +24,14 @@ module Chat::REST
     def authenticate!
       error!('Unauthorized', 401) unless current_user
     end
+
+    def present_with(model, representer_class, options = {})
+      representer_class.new(model, options).to_hash
+    end
+
+    def present_collection_with(collection, representer_class, options = {})
+      collection.map { |item| present_with(item, representer_class, options) }
+    end
   end
 
   class Root < Grape::API
@@ -39,5 +48,17 @@ module Chat::REST
     mount Chat::REST::Users
     mount Chat::REST::Channels
     mount Chat::REST::Tokens
+
+    add_swagger_documentation(
+      api_version: 'v1',
+      mount_path: '/docs'
+    )
   end
 end
+
+# Load REST endpoints
+require 'chat/rest/ping'
+require 'chat/rest/users'
+require 'chat/rest/channels'
+require 'chat/rest/messages'
+require 'chat/rest/tokens'

@@ -26,11 +26,7 @@ module Chat
         def members
           return [] unless include_members?
 
-          member_ids = represented.member_ids || []
-          return [] if member_ids.empty?
-
-          users = Chat::Models::User.where(id: member_ids).all
-          users.map do |user|
+          represented.users.map do |user|
             Chat::REST::Representers::User.new(user).to_hash
           end
         end

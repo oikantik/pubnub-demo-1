@@ -15,17 +15,12 @@ module Chat::REST
       end
 
       desc 'Generate a PubNub access token'
-      params do
-        optional :ttl, type: Integer, default: 86400, desc: 'Token time-to-live in seconds (default: 24 hours)'
-      end
       post :pubnub do
-        pubnub_service = Chat::Services::Pubnub.new
-        token = pubnub_service.generate_token(current_user.id, params[:ttl])
+        # Generate token (already stored in Redis by the service)
+        token = Chat::Services::Pubnub.generate_token(current_user.id)
+        error!('Failed to generate token', 500) unless token
 
-        {
-          token: token,
-          ttl: params[:ttl]
-        }
+        present_with(Object.new, Chat::REST::Representers::Token, token: token)
       end
     end
   end
