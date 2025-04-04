@@ -25,10 +25,12 @@ module Chat
 
       def self.publish_to_pubnub(message, channel_name = nil)
         begin
-          # Get the channel name if not provided
-          unless channel_name
-            channel_name = message.channel.name
-          end
+          # Get the channel information if needed
+          channel = message.channel
+          channel_name ||= channel.name
+          channel_id = channel.id.to_s
+
+          puts "Publishing message to PubNub: #{message.id} to channel: #{channel_name} (#{channel_id})"
 
           # Format the message for PubNub
           message_data = {
@@ -37,10 +39,19 @@ module Chat
             sender: message.sender.name,
             timestamp: message.timestamp || message.created_at.to_i,
             channel: channel_name,
+            channel_id: channel_id,
             event: 'new_message'
           }
 
-          # Publish using the PubNub service
+          # Publish using the PubNub service to both channel ID and name to ensure delivery
+          puts "Publishing to channel ID: #{channel_id}"
+          Chat::Services::Pubnub.instance.publish(
+            channel: channel_id,
+            message: message_data,
+            user_id: message.sender_id
+          )
+
+          puts "Publishing to channel name: #{channel_name}"
           Chat::Services::Pubnub.instance.publish(
             channel: channel_name,
             message: message_data,
