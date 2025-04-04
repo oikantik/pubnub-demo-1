@@ -17,7 +17,8 @@ module Chat
 
         # Generate a session token and store in Redis
         token = SecureRandom.uuid
-        Chat::Services::Redis.cache_user_auth_token(user.id, token)
+        # Use set_user_token to ensure proper mappings for authentication
+        Chat::Services::Redis.set_user_token(user.id, token)
 
         # Set online status
         Chat::Services::Redis.store_online_status(user.id, 'online')

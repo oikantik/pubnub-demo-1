@@ -2,13 +2,12 @@
 
 require 'roar/decorator'
 require 'roar/json'
+require_relative 'base'
 
 module Chat
   module REST
     module Representers
-      class Channel < Roar::Decorator
-        include Roar::JSON
-
+      class Channel < Base
         property :id
         property :name
         property :description
@@ -17,7 +16,7 @@ module Chat
         property :updated_at
 
         # Add user list when needed
-        collection :members, exec_context: :decorator, if: ->(_) { exec_context.include_members? }
+        collection :members, exec_context: :decorator, if: ->(_) { self.include_members? }
 
         def include_members?
           options[:include_members] || false

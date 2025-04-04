@@ -2,15 +2,14 @@
 
 require 'roar/decorator'
 require 'roar/json'
+require_relative 'base'
 
 module Chat
   module REST
     module Representers
       # Representer for PubNub authentication tokens
       # Used to format token responses for the API
-      class Token < Roar::Decorator
-        include Roar::JSON
-
+      class Token < Base
         # @!attribute [r] token
         #   @return [String] The PubNub authentication token
         property :token, exec_context: :decorator

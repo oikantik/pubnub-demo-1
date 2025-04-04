@@ -21,7 +21,12 @@ module Chat::REST
     end
 
     def present_with(model, representer_class, options = {})
-      representer_class.new(model, options).to_hash
+      # Create a proper instance with options
+      representer = representer_class.prepare(model)
+      # Set options for the representer instance
+      representer.options = options if options.any?
+      # Return the hash so it can be merged
+      representer.to_hash
     end
 
     def present_collection_with(collection, representer_class, options = {})

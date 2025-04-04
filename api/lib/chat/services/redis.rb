@@ -39,10 +39,15 @@ module Chat
         get("auth:#{token}")
       end
 
-      def self.set_user_token(token, user_id, ttl = 86400)
+      def self.set_user_token(user_id, token, ttl = 86400)
         # Store token -> user_id mapping for authentication
         set("auth:#{token}", user_id, ttl)
         # Store user_id -> token mapping for pubnub access
+        set_pubnub_token(user_id, token, ttl)
+      end
+
+      def self.set_pubnub_token(user_id, token, ttl = 86400)
+        # Store user_id -> token mapping for PubNub access
         set("pubnub:#{user_id}", token, ttl)
       end
 

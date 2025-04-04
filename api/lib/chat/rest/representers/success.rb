@@ -2,27 +2,25 @@
 
 require 'roar/decorator'
 require 'roar/json'
+require_relative 'base'
 
 module Chat
   module REST
     module Representers
-      class Success < Roar::Decorator
-        include Roar::JSON
-
+      class Success < Base
         property :success, exec_context: :decorator
+        property :message, exec_context: :decorator, if: ->(_) { self.message? }
 
         def success
           true
         end
 
-        property :message, exec_context: :decorator, if: ->(_) { exec_context.message? }
-
-        def message?
-          options[:message].present?
-        end
-
         def message
           options[:message]
+        end
+
+        def message?
+          !options[:message].nil?
         end
       end
     end

@@ -2,13 +2,12 @@
 
 require 'roar/decorator'
 require 'roar/json'
+require_relative 'base'
 
 module Chat
   module REST
     module Representers
-      class Message < Roar::Decorator
-        include Roar::JSON
-
+      class Message < Base
         property :id
         property :text, as: :message
         property :sender_id, as: :sender
@@ -16,8 +15,8 @@ module Chat
         property :timestamp
 
         # Include sender and channel info if requested
-        property :sender_info, exec_context: :decorator, if: ->(_) { exec_context.include_sender? }
-        property :channel_info, exec_context: :decorator, if: ->(_) { exec_context.include_channel? }
+        property :sender_info, exec_context: :decorator, if: ->(_) { self.include_sender? }
+        property :channel_info, exec_context: :decorator, if: ->(_) { self.include_channel? }
 
         def include_sender?
           options[:include_sender] || false

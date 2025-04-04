@@ -2,13 +2,12 @@
 
 require 'roar/decorator'
 require 'roar/json'
+require_relative 'base'
 
 module Chat
   module REST
     module Representers
-      class User < Roar::Decorator
-        include Roar::JSON
-
+      class User < Base
         property :id
         property :name
         property :created_at

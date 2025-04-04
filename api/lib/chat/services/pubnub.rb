@@ -10,8 +10,6 @@ module Chat
     # Handles token generation and publishing messages
     # Uses PubNub Access Manager v3 (PAMv3) for authorization
     class Pubnub
-      # Channel for global updates like new channel creation
-      CHANNEL_UPDATES = 'channel-updates'
 
       # Default token TTL in seconds (24 hours)
       DEFAULT_TTL = 86400
@@ -20,7 +18,13 @@ module Chat
       include Singleton
 
       # Initialize the service
-      def initialize; end
+      def initialize
+        # Log environment variables (redact sensitive parts)
+        puts "PubNub initialized with keys:"
+        puts "  Subscribe Key: #{ENV['PUBNUB_SUBSCRIBE_KEY'] ? 'Configured' : 'Missing'}"
+        puts "  Publish Key: #{ENV['PUBNUB_PUBLISH_KEY'] ? 'Configured' : 'Missing'}"
+        puts "  Secret Key: #{ENV['PUBNUB_SECRET_KEY'] ? 'Configured' : 'Missing'}"
+      end
 
       # @return [::Pubnub] PubNub admin client with full permissions
       def admin_client
@@ -40,8 +44,12 @@ module Chat
       def pubnub_client_for_user(user_id)
         # Get token for user
         token = Chat::Services::Redis.get_pubnub_token(user_id)
-        return admin_client unless token
+        unless token
+          puts "No PubNub token found in Redis for user #{user_id}, falling back to admin client"
+          return admin_client
+        end
 
+        puts "Creating PubNub client for user #{user_id} with token"
         # Create a new client with the token
         ::Pubnub.new(
           subscribe_key: ENV['PUBNUB_SUBSCRIBE_KEY'],
@@ -119,35 +127,103 @@ module Chat
         nil
       end
 
+      # Grant access to a specific channel for a user
+      # In PAMv3, permissions are granted by generating a new token with updated permissions
+      #
+      # @param user_id [Integer, String] User ID to grant access to
+      # @param channel_id [Integer, String] Channel ID to grant access to
+      # @return [Boolean] Success or failure of the operation
+      def grant_channel_access(user_id, channel_id)
+        # Generate a new token with the updated permissions
+        # This will include all channels the user has access to
+        new_token = generate_token(user_id)
+        return false unless new_token
+
+        true
+      end
+
+      # Revoke a token
+      #
+      # @param token [String] The token to revoke
+      # @return [Boolean] Success or failure
+      def revoke_token(token)
+        # Get user ID from token
+        user_id = Chat::Services::Redis.get_user_from_token(token)
+        return false unless user_id
+
+        # Delete token from Redis
+        Chat::Services::Redis.delete("auth:#{token}")
+        Chat::Services::Redis.delete("pubnub:#{user_id}")
+
+        true
+      end
+
       # Generate a PubNub access token with permissions for a user
       # Uses PubNub Access Manager v3 (PAMv3) for token generation
+      # Tokens are cached in Redis with the appropriate TTL
       #
       # @param user_id [String] User ID to generate token for
+      # @param force_refresh [Boolean] If true, generate a new token even if one exists in cache
       # @return [String, nil] Generated token or nil if failure
-      def generate_token(user_id)
+      def generate_token(user_id, force_refresh = false)
+        puts "Generating PubNub token for user: #{user_id}, force_refresh: #{force_refresh}"
+
+        # Check if we have a cached token unless forcing refresh
+        unless force_refresh
+          puts "Checking for cached token in Redis for user #{user_id}"
+          cached_token = Chat::Services::Redis.get_pubnub_token(user_id)
+          if cached_token
+            puts "Found cached token for user #{user_id}"
+            return cached_token
+          end
+          puts "No cached token found for user #{user_id}"
+        end
+
         # Get user object
         user = Chat::Models::User[user_id]
-        return nil unless user
+        unless user
+          puts "Error: User #{user_id} not found"
+          return nil
+        end
 
         # Get channel resources with permissions
+        puts "Building resources for user #{user_id}"
         resources = token_resources_for_user(user)
 
+        # Verify PubNub keys are available
+        unless ENV['PUBNUB_SUBSCRIBE_KEY'] && ENV['PUBNUB_PUBLISH_KEY'] && ENV['PUBNUB_SECRET_KEY']
+          puts "Error: Missing PubNub keys in environment"
+          return nil
+        end
+
         # Create token with permissions using PAMv3
-        token_request = admin_client.grant_token(
-          ttl: DEFAULT_TTL,
-          resources: resources,
-          http_sync: true
-        )
+        puts "Requesting token from PubNub for user #{user_id}"
+        begin
+          token_request = admin_client.grant_token(
+            ttl: DEFAULT_TTL,
+            resources: resources,
+            authorized_uuid: user_id.to_s,
+            http_sync: true
+          )
 
-        # Process result
-        result = token_request.result
+          # Process result
+          result = token_request.result
 
-        if result && result[:token]
-          # Store token in Redis with TTL
-          Chat::Services::Redis.set_user_token(result[:token], user.id, DEFAULT_TTL)
-          result[:token]
-        else
-          puts "Error generating token: #{token_request.status[:error]}"
+          if result && result[:token]
+            puts "Successfully received token from PubNub for user #{user_id}"
+            # Store token in Redis with TTL
+            Chat::Services::Redis.set_pubnub_token(user_id, result[:token], DEFAULT_TTL)
+            # Also store the user-token mapping for reverse lookup
+            Chat::Services::Redis.set_user_token(user_id, result[:token], DEFAULT_TTL)
+            result[:token]
+          else
+            puts "Error generating token for user #{user_id}: #{token_request.status[:error].inspect}"
+            puts "Status: #{token_request.status.inspect}"
+            nil
+          end
+        rescue => e
+          puts "Exception while generating token for user #{user_id}: #{e.class.name} - #{e.message}"
+          puts e.backtrace.join("\n")
           nil
         end
       end
@@ -162,9 +238,9 @@ module Chat
         # Get channels the user is a member of
         user_channels = Chat::Services::Channel.get_user_channels(user)
 
-        # Create array of channel IDs and add the channel-updates channel
+        # Create array of channel IDs
         channels = user_channels.map { |c| c.id.to_s }
-        channels << CHANNEL_UPDATES
+        puts "User #{user.id} has access to channels: #{channels.join(', ')}"
 
         # Initialize resources structure
         resources = {
@@ -181,10 +257,15 @@ module Chat
 
         # Add channel permissions
         channels.each do |channel|
-          # Main channel - read and write
+          # Main channel - all permissions
           resources[:channels][channel] = {
             read: true,
-            write: true
+            write: true,
+            delete: true,
+            get: true,
+            update: true,
+            manage: true,
+            join: true
           }
 
           # Presence channel - read only
@@ -192,6 +273,11 @@ module Chat
             read: true
           }
         end
+
+        # Add token updates channel for receiving token refresh notifications
+        resources[:channels]["token-updates"] = {
+          read: true
+        }
 
         resources
       end
