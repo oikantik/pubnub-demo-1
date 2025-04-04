@@ -55,7 +55,26 @@ module Chat::REST
 
     add_swagger_documentation(
       api_version: 'v1',
-      mount_path: '/docs'
+      info: {
+        title: 'Chat API',
+        description: 'A RESTful API for the Chat application',
+        contact_name: 'API Support',
+        contact_email: 'support@example.com'
+      },
+      doc_version: '1.0.0',
+      mount_path: '/docs',
+      add_version: true,
+      hide_documentation_path: true,
+      hide_format: true,
+      host: 'localhost',
+      security_definitions: {
+        Bearer: {
+          type: 'apiKey',
+          name: 'Authorization',
+          in: 'header'
+        }
+      },
+      security: [{ Bearer: [] }]
     )
   end
 end

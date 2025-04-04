@@ -39,6 +39,17 @@ module Chat
         get("auth:#{token}")
       end
 
+      def self.set_user_token(token, user_id, ttl = 86400)
+        # Store token -> user_id mapping for authentication
+        set("auth:#{token}", user_id, ttl)
+        # Store user_id -> token mapping for pubnub access
+        set("pubnub:#{user_id}", token, ttl)
+      end
+
+      def self.get_pubnub_token(user_id)
+        get("pubnub:#{user_id}")
+      end
+
       def self.store_online_status(user_id, status)
         set("user:#{user_id}:status", status)
       end

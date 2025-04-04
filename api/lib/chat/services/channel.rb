@@ -15,7 +15,7 @@ module Chat
         end
 
         # Publish channel creation notification
-        Chat::Services::Pubnub.notify_channel_members(channel, creator)
+        publish_channel_creation(channel, creator)
 
         channel
       end
@@ -27,7 +27,7 @@ module Chat
         channel.add_user(user)
 
         # Publish join event
-        Chat::Services::Pubnub.notify_channel_join(channel, user)
+        publish_member_joined(channel, user)
 
         true
       end
@@ -42,6 +42,33 @@ module Chat
 
       def self.get_user_channels(user)
         user.channels
+      end
+
+      private
+
+      # Publish notification about channel creation
+      def self.publish_channel_creation(channel, creator)
+        representer = Chat::REST::Representers::Channel.new(channel)
+        Chat::Services::Pubnub.instance.publish(
+          channel: Chat::Services::Pubnub::CHANNEL_UPDATES,
+          message: {
+            event: 'channel_created',
+            channel: representer.to_hash,
+            creator: Chat::REST::Representers::User.new(creator).to_hash
+          }
+        )
+      end
+
+      # Publish notification about user joining a channel
+      def self.publish_member_joined(channel, user)
+        representer = Chat::REST::Representers::User.new(user)
+        Chat::Services::Pubnub.instance.publish(
+          channel: channel.id.to_s,
+          message: {
+            event: 'user_joined',
+            user: representer.to_hash
+          }
+        )
       end
     end
   end

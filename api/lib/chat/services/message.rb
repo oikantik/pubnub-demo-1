@@ -18,7 +18,7 @@ module Chat
         )
 
         # Publish the message
-        Chat::Services::Pubnub.publish_message(message)
+        Chat::Services::Pubnub.instance.publish_message(message)
 
         message
       end
