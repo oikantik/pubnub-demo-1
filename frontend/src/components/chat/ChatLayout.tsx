@@ -19,6 +19,7 @@ interface Channel {
 interface Message {
   id?: string;
   sender: string;
+  sender_id: string;
   content: string;
   timestamp: number;
   type?: string;
@@ -128,7 +129,8 @@ export function ChatLayout({ userName, userId, onLogout }: ChatLayoutProps) {
         // Transform messages to match our format
         const formattedMessages = response.data.map((msg: any) => ({
           id: msg.id,
-          sender: msg.sender_id || msg.sender,
+          sender: msg.sender,
+          sender_id: msg.sender_id,
           content: msg.text || msg.message,
           timestamp: msg.timestamp,
         }));
@@ -145,7 +147,7 @@ export function ChatLayout({ userName, userId, onLogout }: ChatLayoutProps) {
     // Set up listeners
     pubnubClient.setupListeners({
       onMessage: (_, messageEvent) => {
-        const { type, content, sender, timestamp } = messageEvent;
+        const { type, content, sender, sender_id, timestamp } = messageEvent;
 
         if (type === "message") {
           setMessages((prev) => [
@@ -153,6 +155,7 @@ export function ChatLayout({ userName, userId, onLogout }: ChatLayoutProps) {
             {
               id: `${sender}-${timestamp}`,
               sender,
+              sender_id: sender_id,
               content,
               timestamp,
             },

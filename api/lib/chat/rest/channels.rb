@@ -146,6 +146,7 @@ module Chat::REST
             {
               message: msg.text,
               sender: msg.sender.name,
+              sender_id: msg.sender.id.to_s,
               timestamp: msg.created_at.to_i,
               channel: channel.name,
               channel_id: channel.id.to_s,

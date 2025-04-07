@@ -17,7 +17,7 @@ module Chat::REST
       end
       post :login do
         # Login or create user and get auth token
-        user, token = Chat::Services::User.login(params[:name])
+        user, token = Chat::Services::User.login(params[:name].to_s.downcase)
 
         # Ensure user ID and token are present
         unless user && token
@@ -66,7 +66,7 @@ module Chat::REST
         authenticate!
 
         # Check if channel exists
-        channel = Chat::Models::Channel.find(name: params[:name])
+        channel = Chat::Models::Channel.find(name: params[:name].to_s.downcase)
 
         if channel
           # Join existing channel
@@ -74,7 +74,7 @@ module Chat::REST
         else
           # Create new channel with current user as creator/member
           channel = Chat::Services::Channel.create_with_creator({
-            name: params[:name]
+            name: params[:name].to_s.downcase
           }, current_user)
         end
 
