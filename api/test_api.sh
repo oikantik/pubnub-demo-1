@@ -69,7 +69,7 @@ curl_and_format -H "Authorization: Bearer $TOKEN" "$API_HOST/v1/users/me"
 
 # Step 4: Create a channel
 echo -e "\n== Creating Channel =="
-CHANNEL_RESULT=$(curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"name":"test-channel-'$(date +%s)'"}' "$API_HOST/v1/users/channels")
+CHANNEL_RESULT=$(curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"name":"test-channel-'$(date +%s)'"}' "$API_HOST/v1/channels")
 if $USE_JQ; then
   echo "$CHANNEL_RESULT" | jq
 else

@@ -47,13 +47,14 @@ export class PubNubClient {
         publishKey: PUBNUB_PUBLISH_KEY,
         subscribeKey: PUBNUB_SUBSCRIBE_KEY,
         uuid: userId,
-        authKey: pubnubToken,
         heartbeatInterval: 30,
         presenceTimeout: 60,
       };
 
       // Initialize the client
       this.client = new PubNub(config);
+
+      this.client.setToken(pubnubToken);
       console.log("PubNub client initialized with token");
 
       return this.client;
@@ -76,12 +77,17 @@ export class PubNubClient {
 
   // Subscribe to channels
   public subscribe(channels: string[]): void {
-    if (!this.client) return;
+    if (!this.client) {
+      console.error("Cannot subscribe: PubNub client is not initialized");
+      return;
+    }
 
+    console.log("PubNub subscribing to channels:", channels);
     this.client.subscribe({
       channels,
       withPresence: true,
     });
+    console.log("PubNub subscription completed for channels:", channels);
   }
 
   // Unsubscribe from channels

@@ -39,9 +39,26 @@ export function MessageList({
     });
   };
 
+  // Deduplicate messages by content and sender
+  const deduplicatedMessages = messages.reduce((unique: Message[], message) => {
+    // Check if this message (by content+sender+timestamp within 2 seconds) is already in our unique list
+    const isDuplicate = unique.some(
+      (m) =>
+        m.content === message.content &&
+        m.sender_id === message.sender_id &&
+        Math.abs(m.timestamp - message.timestamp) < 2
+    );
+
+    if (!isDuplicate) {
+      unique.push(message);
+    }
+
+    return unique;
+  }, []);
+
   return (
     <div className="flex-1 overflow-y-auto p-4 space-y-4">
-      {messages.length === 0 ? (
+      {deduplicatedMessages.length === 0 ? (
         <div className="flex items-center justify-center h-full">
           <p className="text-muted-foreground">
             No messages yet. Start the conversation!
@@ -49,8 +66,7 @@ export function MessageList({
         </div>
       ) : (
         <>
-          {messages.map((message, index) => {
-            console.log("message", message);
+          {deduplicatedMessages.map((message, index) => {
             const isCurrentUser = message.sender_id === currentUserId;
 
             return (

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Button } from "../ui/button";
 import { Menu, LogOut } from "lucide-react";
@@ -23,6 +23,7 @@ interface Message {
   content: string;
   timestamp: number;
   type?: string;
+  client_id?: string;
 }
 
 interface ChatLayoutProps {
@@ -43,6 +44,9 @@ export function ChatLayout({ userName, userId, onLogout }: ChatLayoutProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const { presence } = usePubNubContext();
+
+  // Use useRef for tracking message IDs - this won't trigger re-renders and persists between renders
+  const processedMessageIds = useRef(new Set<string>());
 
   // Handle routing to a specific channel
   useEffect(() => {
@@ -144,28 +148,53 @@ export function ChatLayout({ userName, userId, onLogout }: ChatLayoutProps) {
 
     fetchMessages();
 
+    // Clear processed message IDs when changing channels
+    processedMessageIds.current.clear();
+
     // Set up listeners
     pubnubClient.setupListeners({
-      onMessage: (_, messageEvent) => {
-        const { type, content, sender, sender_id, timestamp } = messageEvent;
+      onMessage: (channel, messageEvent) => {
+        console.log("PubNub message received:", channel, messageEvent);
 
-        if (type === "message") {
+        // Check if we have the required fields
+        if (
+          messageEvent &&
+          (messageEvent.message || messageEvent.content) &&
+          messageEvent.sender
+        ) {
+          // Process the message - we'll rely on the MessageList component to deduplicate
           setMessages((prev) => [
             ...prev,
             {
-              id: `${sender}-${timestamp}`,
-              sender,
-              sender_id: sender_id,
-              content,
-              timestamp,
+              id:
+                messageEvent.id ||
+                `${messageEvent.sender}-${messageEvent.timestamp}`,
+              sender: messageEvent.sender,
+              // Make sure sender_id is properly set for messages from the current user
+              sender_id:
+                messageEvent.sender === userName ||
+                messageEvent.sender === userId
+                  ? userId
+                  : messageEvent.sender_id || messageEvent.sender,
+              content: messageEvent.message || messageEvent.content,
+              timestamp: messageEvent.timestamp,
             },
           ]);
+        } else {
+          console.warn("Received message in unexpected format:", messageEvent);
         }
       },
     });
 
-    // No need to manually subscribe/unsubscribe as the token has the necessary permissions
-  }, [currentChannelId, channels]);
+    console.log("Subscribing to channel:", currentChannelId);
+    // Subscribe to the channel to receive real-time updates
+    pubnubClient.subscribe([currentChannelId]);
+
+    // Clean up subscription when unmounting or changing channels
+    return () => {
+      pubnubClient.unsubscribe([currentChannelId]);
+    };
+  }, [currentChannelId, channels, routeChannelId]);
 
   // Handle channel selection
   const handleSelectChannel = (channelId: string) => {
@@ -222,8 +251,12 @@ export function ChatLayout({ userName, userId, onLogout }: ChatLayoutProps) {
     if (!currentChannelId) return;
 
     try {
-      await API.sendMessage(currentChannelId, message);
-      // Message will be added to the list via PubNub subscription
+      console.log("Sending message to channel:", currentChannelId, message);
+
+      // Send the message to the server and let PubNub deliver it
+      // Don't add to local state to avoid duplicates
+      const response = await API.sendMessage(currentChannelId, message);
+      console.log("Message sent response:", response);
     } catch (error) {
       console.error("Failed to send message:", error);
     }

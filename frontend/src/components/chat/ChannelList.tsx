@@ -73,7 +73,6 @@ export function OtherChannelsList({
 
   // Filter to only non-joined channels
   const otherChannels = channels.filter((channel) => channel.joined === false);
-  console.log("otherChannels", channels, otherChannels);
 
   if (otherChannels.length === 0) {
     return (

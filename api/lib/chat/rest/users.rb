@@ -57,32 +57,6 @@ module Chat::REST
         # Return current authenticated user
         present_with(current_user, Chat::REST::Representers::User)
       end
-
-      desc 'Create or join a channel'
-      params do
-        requires :name, type: String, desc: 'Channel name'
-      end
-      post :channels do
-        authenticate!
-
-        # Check if channel exists
-        channel = Chat::Models::Channel.find(name: params[:name].to_s.downcase)
-
-        if channel
-          # Join existing channel
-          Chat::Services::Channel.add_member(channel, current_user)
-        else
-          # Create new channel with current user as creator/member
-          channel = Chat::Services::Channel.create_with_creator({
-            name: params[:name].to_s.downcase
-          }, current_user)
-        end
-
-        error!('Failed to create or join channel', 500) unless channel
-
-        # Return channel information
-        present_with(channel, Chat::REST::Representers::Channel)
-      end
     end
   end
 end

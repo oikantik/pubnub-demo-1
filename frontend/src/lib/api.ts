@@ -51,7 +51,7 @@ export class API {
   };
 
   static createChannel = (name: string) => {
-    return apiClient.post("/v1/users/channels", { name });
+    return apiClient.post("/v1/channels", { name });
   };
 
   static joinChannel = (channelId: string) => {
@@ -67,8 +67,12 @@ export class API {
   };
 
   // Messages
-  static sendMessage = (channelId: string, text: string) => {
-    return apiClient.post("/v1/messages", { channel_id: channelId, text });
+  static sendMessage = (channelId: string, text: string, clientId?: string) => {
+    return apiClient.post("/v1/messages", {
+      channel_id: channelId,
+      text,
+      client_id: clientId, // Pass client ID if provided
+    });
   };
 
   // PubNub tokens - this should only be called when initializing PubNub provider
