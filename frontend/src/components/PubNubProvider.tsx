@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import PubNub from "pubnub";
 import { PubNubProvider as Provider } from "pubnub-react";
+import { Spinner, Container } from "react-bootstrap";
 
 const PUBNUB_PUBLISH_KEY =
   import.meta.env.VITE_PUBNUB_PUBLISH_KEY || "pub-c-your-publish-key";
@@ -152,7 +153,20 @@ const PubNubProvider: React.FC<PubNubProviderProps> = ({
 
   // Don't render until we have a PubNub client
   if (!pubnubClient) {
-    return <div>Initializing real-time communication...</div>;
+    return (
+      <Container className="d-flex justify-content-center align-items-center vh-100">
+        <div className="text-center">
+          <Spinner
+            animation="border"
+            variant="success"
+            style={{ color: "#00a884" }}
+          />
+          <p className="mt-3 text-muted">
+            Initializing real-time communication...
+          </p>
+        </div>
+      </Container>
+    );
   }
 
   return <Provider client={pubnubClient}>{children}</Provider>;

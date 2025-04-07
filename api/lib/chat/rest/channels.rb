@@ -34,9 +34,7 @@ module Chat::REST
 
       desc 'Get all available channels'
       get do
-        puts "Fetching all available channels"
         channels = Chat::Models::Channel.all
-        puts "Found #{channels.length} total channels"
 
         # Get the user's channels to mark which ones they've joined
         user_channels = Chat::Services::Channel.get_user_channels(current_user)
@@ -55,14 +53,10 @@ module Chat::REST
         requires :id, type: String, desc: 'Channel ID to join'
       end
       post ':id/join' do
-        puts "User #{current_user.id} attempting to join channel #{params[:id]}"
-
         # Find channel
         begin
           channel = Chat::Models::Channel[params[:id]]
         rescue => e
-          puts "Error looking up channel by ID: #{e.class.name} - #{e.message}"
-          puts e.backtrace.join("\n")
           error!('Channel not found', 404)
         end
 
@@ -72,7 +66,6 @@ module Chat::REST
         is_member = Chat::Services::Channel.is_member?(channel, current_user)
 
         if is_member
-          puts "User is already a member of this channel"
           # Return success but indicate no change
           present_with(channel, Chat::REST::Representers::Channel).merge(
             joined: true,
@@ -82,14 +75,11 @@ module Chat::REST
           # Add user to channel
           begin
             Chat::Services::Channel.add_member(channel, current_user)
-            puts "User added to channel successfully"
             present_with(channel, Chat::REST::Representers::Channel).merge(
               joined: true,
               already_member: false
             )
           rescue => e
-            puts "Error adding user to channel: #{e.class.name} - #{e.message}"
-            puts e.backtrace.join("\n")
             error!("Failed to join channel: #{e.message}", 500)
           end
         end
@@ -124,24 +114,19 @@ module Chat::REST
       end
       get ':id/history' do
         begin
-          puts "Fetching message history for channel ID: #{params[:id]}"
           # First try to find by ID
           channel = nil
 
           # Use a begin/rescue block to properly handle potential UUID errors
           begin
             channel = Chat::Models::Channel[params[:id]]
-            puts "Found channel by ID: #{channel&.id}"
           rescue => e
-            puts "Error finding channel by ID: #{e.class.name} - #{e.message}"
-            puts e.backtrace.join("\n")
+            # Silently handle the error
           end
 
           # If not found by ID, try by name as fallback
           if channel.nil?
-            puts "Channel not found by ID, trying by name: #{params[:id]}"
             channel = Chat::Models::Channel.find(name: params[:id])
-            puts "Found channel by name: #{channel&.id}" if channel
           end
 
           error!('Channel not found', 404) unless channel
@@ -156,8 +141,6 @@ module Chat::REST
             limit: params[:limit]
           )
 
-          puts "Found #{messages.length} messages for channel #{channel.id}"
-
           # Format the messages for the frontend format
           formatted_messages = messages.map do |msg|
             {
@@ -170,11 +153,8 @@ module Chat::REST
             }
           end
 
-          puts "Returning #{formatted_messages.length} formatted messages"
           formatted_messages
         rescue => e
-          puts "Error in channel history: #{e.class.name} - #{e.message}"
-          puts e.backtrace.join("\n")
           error!("Failed to fetch channel history: #{e.message}", 500)
         end
       end

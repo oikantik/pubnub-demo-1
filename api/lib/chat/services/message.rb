@@ -30,8 +30,6 @@ module Chat
           channel_name ||= channel.name
           channel_id = channel.id.to_s
 
-          puts "Publishing message to PubNub: #{message.id} to channel: #{channel_name} (#{channel_id})"
-
           # Format the message for PubNub
           message_data = {
             id: message.id.to_s,
@@ -44,22 +42,19 @@ module Chat
           }
 
           # Publish using the PubNub service to both channel ID and name to ensure delivery
-          puts "Publishing to channel ID: #{channel_id}"
           Chat::Services::Pubnub.instance.publish(
             channel: channel_id,
             message: message_data,
             user_id: message.sender_id
           )
 
-          puts "Publishing to channel name: #{channel_name}"
           Chat::Services::Pubnub.instance.publish(
             channel: channel_name,
             message: message_data,
             user_id: message.sender_id
           )
         rescue => e
-          puts "Error publishing message to PubNub: #{e.message}"
-          puts e.backtrace.join("\n")
+          # Silently catch errors but don't interrupt the flow
         end
       end
 

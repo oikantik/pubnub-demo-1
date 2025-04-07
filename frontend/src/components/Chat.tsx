@@ -1,6 +1,20 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { usePubNub } from "pubnub-react";
-import "./Chat.css";
+import {
+  Container,
+  Row,
+  Col,
+  ListGroup,
+  Form,
+  Button,
+  InputGroup,
+  Card,
+  Badge,
+  FormControl,
+  FormLabel,
+  FormCheck,
+} from "react-bootstrap";
+import { FiSend, FiPlus, FiMenu } from "react-icons/fi";
 
 interface ChatProps {
   userId: string;
@@ -288,6 +302,7 @@ const Chat: React.FC<ChatProps> = ({ userId, authToken }) => {
 
       return cleanup;
     }
+    return undefined;
   }, [pubnub, subscribeToChannel, setupListeners, currentChannelId, authToken]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -407,133 +422,250 @@ const Chat: React.FC<ChatProps> = ({ userId, authToken }) => {
     setMessages([]);
   };
 
-  const toggleChannelView = () => {
-    setShowAllChannels(!showAllChannels);
-  };
-
   return (
-    <div className="chat-container">
-      <div className="sidebar">
-        <div className="channels-header">
-          <h3>Channels</h3>
-          <button className="toggle-channels-btn" onClick={toggleChannelView}>
-            {showAllChannels ? "Show My Channels" : "Show All Channels"}
-          </button>
-        </div>
+    <Container fluid className="h-100 py-3">
+      <Row className="h-100 bg-white shadow rounded overflow-hidden">
+        {/* Sidebar */}
+        <Col
+          xs={12}
+          md={4}
+          lg={3}
+          className="p-0 h-100 border-end"
+          style={{ backgroundColor: "#f0f2f5" }}
+        >
+          {/* Channel Header */}
+          <div
+            className="d-flex justify-content-between align-items-center p-3"
+            style={{ backgroundColor: "#00a884", color: "white" }}
+          >
+            <h5 className="mb-0">Channels</h5>
+            <Form.Check
+              type="switch"
+              id="channel-toggle"
+              label={showAllChannels ? "All Channels" : "My Channels"}
+              checked={showAllChannels}
+              onChange={() => setShowAllChannels(!showAllChannels)}
+              className="text-white"
+            />
+          </div>
 
-        <ul className="channel-list">
-          {showAllChannels ? (
-            // Show all available channels
-            allChannels.length > 0 ? (
-              allChannels.map((channel) => (
-                <li
-                  key={channel.id}
-                  className={`channel-item ${
-                    channel.id === currentChannelId ? "active" : ""
-                  }`}
-                >
-                  <span
-                    className={
-                      channel.joined ? "channel-name joined" : "channel-name"
-                    }
+          {/* Channel List */}
+          <div
+            className="overflow-auto"
+            style={{ height: "calc(100% - 130px)" }}
+          >
+            <ListGroup variant="flush">
+              {showAllChannels ? (
+                // Show all available channels
+                allChannels.length > 0 ? (
+                  allChannels.map((channel) => (
+                    <ListGroup.Item
+                      key={channel.id}
+                      className={`d-flex justify-content-between align-items-center ${
+                        currentChannelId === channel.id ? "bg-light" : ""
+                      }`}
+                      style={{ cursor: "pointer" }}
+                    >
+                      <span className={channel.joined ? "fw-bold" : ""}>
+                        {channel.name}
+                      </span>
+                      {channel.joined ? (
+                        <Button
+                          variant={
+                            currentChannelId === channel.id
+                              ? "secondary"
+                              : "outline-primary"
+                          }
+                          size="sm"
+                          onClick={() => handleChannelSelect(channel)}
+                          disabled={channel.id === currentChannelId}
+                          style={{ minWidth: "80px" }}
+                        >
+                          {channel.id === currentChannelId
+                            ? "Current"
+                            : "Select"}
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="success"
+                          size="sm"
+                          onClick={() => handleJoinChannel(channel.id)}
+                          disabled={isJoining}
+                          style={{ minWidth: "80px" }}
+                        >
+                          {isJoining ? "..." : "Join"}
+                        </Button>
+                      )}
+                    </ListGroup.Item>
+                  ))
+                ) : (
+                  <ListGroup.Item className="text-center text-muted fst-italic">
+                    No channels available
+                  </ListGroup.Item>
+                )
+              ) : // Show only user's joined channels
+              userChannels.length > 0 ? (
+                userChannels.map((channel) => (
+                  <ListGroup.Item
+                    key={channel.id}
+                    active={currentChannelId === channel.id}
+                    onClick={() => handleChannelSelect(channel)}
+                    className="d-flex align-items-center"
+                    style={{ cursor: "pointer" }}
                   >
                     {channel.name}
-                  </span>
-                  {channel.joined ? (
-                    <button
-                      className="channel-action-btn select-btn"
-                      onClick={() => handleChannelSelect(channel)}
-                      disabled={channel.id === currentChannelId}
-                    >
-                      {channel.id === currentChannelId ? "Current" : "Select"}
-                    </button>
-                  ) : (
-                    <button
-                      className="channel-action-btn join-btn"
-                      onClick={() => handleJoinChannel(channel.id)}
-                      disabled={isJoining}
-                    >
-                      {isJoining ? "Joining..." : "Join"}
-                    </button>
-                  )}
-                </li>
-              ))
-            ) : (
-              <li className="no-channels">No channels available</li>
-            )
-          ) : // Show only user's joined channels
-          userChannels.length > 0 ? (
-            userChannels.map((channel) => (
-              <li
-                key={channel.id}
-                className={currentChannelId === channel.id ? "active" : ""}
-                onClick={() => handleChannelSelect(channel)}
-              >
-                {channel.name}
-              </li>
-            ))
-          ) : (
-            <li className="no-channels">You haven't joined any channels yet</li>
-          )}
-        </ul>
+                  </ListGroup.Item>
+                ))
+              ) : (
+                <ListGroup.Item className="text-center text-muted fst-italic">
+                  You haven't joined any channels yet
+                </ListGroup.Item>
+              )}
+            </ListGroup>
+          </div>
 
-        <form onSubmit={handleCreateChannel} className="create-channel-form">
-          <input
-            type="text"
-            value={newChannelName}
-            onChange={(e) => setNewChannelName(e.target.value)}
-            placeholder="New channel name"
-          />
-          <button type="submit">Create Channel</button>
-        </form>
-      </div>
-
-      <div className="messages-section">
-        <h2>{currentChannelName || "Select a channel"}</h2>
-        <div className="messages">
-          {!currentChannelId ? (
-            <p className="no-channel">Please select or create a channel</p>
-          ) : messages.length === 0 ? (
-            <p className="no-messages">
-              No messages yet. Be the first to send one!
-            </p>
-          ) : (
-            messages.map((msg, index) => {
-              // Check if this message is from the current user
-              const isOwnMessage =
-                pubnub.getUUID() === msg.sender || userId === msg.sender;
-              return (
-                <div
-                  key={msg.id || index}
-                  className={`message ${isOwnMessage ? "sent" : "received"}`}
+          {/* Create Channel Form */}
+          <div className="p-3 border-top">
+            <Form onSubmit={handleCreateChannel}>
+              <InputGroup>
+                <Form.Control
+                  type="text"
+                  placeholder="New channel name"
+                  value={newChannelName}
+                  onChange={(e) => setNewChannelName(e.target.value)}
+                />
+                <Button
+                  variant="primary"
+                  type="submit"
+                  disabled={!newChannelName.trim()}
+                  style={{ backgroundColor: "#00a884", borderColor: "#00a884" }}
                 >
-                  <div className="message-content">
-                    <p>{msg.message}</p>
-                    <div className="message-meta">
-                      <span className="sender">{msg.sender}</span>
-                      <span className="timestamp">
-                        {new Date(msg.timestamp * 1000).toLocaleTimeString()}
-                      </span>
+                  <FiPlus />
+                </Button>
+              </InputGroup>
+            </Form>
+          </div>
+        </Col>
+
+        {/* Messages Section */}
+        <Col xs={12} md={8} lg={9} className="p-0 d-flex flex-column h-100">
+          {/* Message Header */}
+          <div className="p-3 bg-light border-bottom d-flex align-items-center">
+            <Button
+              variant="light"
+              className="d-md-none me-2 p-1"
+              aria-label="Menu"
+            >
+              <FiMenu />
+            </Button>
+            <h5 className="mb-0">{currentChannelName || "Select a channel"}</h5>
+          </div>
+
+          {/* Messages Container */}
+          <div
+            className="flex-grow-1 p-3 overflow-auto"
+            style={{
+              backgroundImage:
+                'url("https://web.whatsapp.com/img/bg-chat-tile-light_686b98c9fdffef3f.png")',
+              backgroundRepeat: "repeat",
+              backgroundColor: "#efeae2",
+            }}
+          >
+            {!currentChannelId ? (
+              <div className="text-center text-muted fst-italic mt-4">
+                Please select or create a channel
+              </div>
+            ) : messages.length === 0 ? (
+              <div className="text-center text-muted fst-italic mt-4">
+                No messages yet. Be the first to send one!
+              </div>
+            ) : (
+              messages.map((msg, index) => {
+                // Check if this message is from the current user
+                const isOwnMessage =
+                  pubnub.getUUID() === msg.sender || userId === msg.sender;
+
+                return (
+                  <div
+                    key={msg.id || index}
+                    className={`d-flex mb-2 ${
+                      isOwnMessage
+                        ? "justify-content-end"
+                        : "justify-content-start"
+                    }`}
+                  >
+                    <div
+                      className={`p-2 rounded shadow-sm ${
+                        isOwnMessage ? "bg-success text-white" : "bg-white"
+                      }`}
+                      style={{
+                        maxWidth: "70%",
+                        backgroundColor: isOwnMessage ? "#d9fdd3" : "#ffffff",
+                        color: "black",
+                      }}
+                    >
+                      <div>{msg.message}</div>
+                      <div className="d-flex justify-content-between align-items-center mt-1">
+                        <small
+                          className="fw-bold"
+                          style={{ fontSize: "0.7rem", color: "#8696a0" }}
+                        >
+                          {msg.sender}
+                        </small>
+                        <small style={{ fontSize: "0.7rem", color: "#8696a0" }}>
+                          {new Date(msg.timestamp * 1000).toLocaleTimeString(
+                            [],
+                            {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            }
+                          )}
+                        </small>
+                      </div>
                     </div>
                   </div>
-                </div>
-              );
-            })
+                );
+              })
+            )}
+          </div>
+
+          {/* Message Form */}
+          {currentChannelId && (
+            <div className="p-3 bg-light border-top">
+              <Form onSubmit={handleSubmit}>
+                <InputGroup>
+                  <Form.Control
+                    type="text"
+                    placeholder="Type a message..."
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    className="rounded-pill me-2"
+                  />
+                  <Button
+                    variant="primary"
+                    type="submit"
+                    disabled={!input.trim()}
+                    className="rounded-circle"
+                    style={{
+                      backgroundColor: "#00a884",
+                      borderColor: "#00a884",
+                      width: "40px",
+                      height: "40px",
+                      padding: "0",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <FiSend />
+                  </Button>
+                </InputGroup>
+              </Form>
+            </div>
           )}
-        </div>
-        {currentChannelId && (
-          <form onSubmit={handleSubmit} className="message-form">
-            <input
-              type="text"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="Type a message..."
-            />
-            <button type="submit">Send</button>
-          </form>
-        )}
-      </div>
-    </div>
+        </Col>
+      </Row>
+    </Container>
   );
 };
 
