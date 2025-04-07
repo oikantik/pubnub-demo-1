@@ -56,7 +56,7 @@ export class PubNubClient {
 
       this.client.setToken(pubnubToken);
       console.log("PubNub client initialized with token");
-      console.log("PubNub token:", pubnubToken);
+      console.log("PubNub token:", this.client.parseToken(pubnubToken));
 
       return this.client;
     } catch (error) {
