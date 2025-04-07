@@ -12,7 +12,7 @@ module Chat
     class Pubnub
 
       # Default token TTL in seconds (24 hours)
-      DEFAULT_TTL = 86400
+      DEFAULT_TTL = 60 * 60
 
       # Singleton implementation
       include Singleton
@@ -43,22 +43,16 @@ module Chat
       # @param user_id [String] The user ID to get client for
       # @return [::Pubnub] PubNub client configured with user's token
       def pubnub_client_for_user(user_id)
-        # Get token for user
-        token = Chat::Services::Redis.get_pubnub_token(user_id)
-        unless token
-          return admin_client
-        end
 
         # Create a new client with the token
         ::Pubnub.new(
           subscribe_key: ENV['PUBNUB_SUBSCRIBE_KEY'],
           publish_key: ENV['PUBNUB_PUBLISH_KEY'],
           uuid: user_id.to_s,
-          auth: token,
           ssl: true
         )
       rescue => e
-        admin_client
+        raise e
       end
 
       # Publish a message to a channel
@@ -165,9 +159,11 @@ module Chat
       # @return [String, nil] Generated token or nil if failure
       def generate_token(user_id, force_refresh = false)
         # Check if we have a cached token unless forcing refresh
+        pp "i am here"
         unless force_refresh
           cached_token = Chat::Services::Redis.get_pubnub_token(user_id)
           if cached_token
+            pp cached_token
             return cached_token
           end
         end
@@ -202,7 +198,6 @@ module Chat
 
           # Process result
           result = token_request&.result
-          status = token_request&.status
 
           if result && result[:token]
             # Store token in Redis with TTL
@@ -210,6 +205,7 @@ module Chat
             # Also store the user-token mapping for reverse lookup
             Chat::Services::Redis.set_user_token(user_id, result[:token], DEFAULT_TTL)
             result[:token]
+            pp token_request.result
           else
             nil
           end
@@ -231,29 +227,6 @@ module Chat
         # Create array of channel IDs
         channels = user_channels.map { |c| c.id.to_s }
 
-        # Add a global resource to allow access to all channels
-        # This is a simplification for the demo, in production you would be more restrictive
-        resources = {
-          channels: {
-            # Allow access to all channels for demo purposes
-            '*': {
-              read: true,
-              write: true,
-              get: true,
-              update: true,
-              join: true
-            }
-          },
-          channel_groups: {},
-          uuids: {
-            # Add permission for the user's own UUID
-            user.id.to_s => {
-              update: true,
-              get: true
-            }
-          }
-        }
-
         # Add specific channel permissions (in addition to the wildcard)
         channels.each do |channel|
           # Main channel - all permissions
@@ -272,11 +245,6 @@ module Chat
             read: true
           }
         end
-
-        # Add token updates channel for receiving token refresh notifications
-        resources[:channels]["token-updates"] = {
-          read: true
-        }
 
         resources
       end

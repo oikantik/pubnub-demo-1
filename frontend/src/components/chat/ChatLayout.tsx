@@ -113,14 +113,24 @@ export function ChatLayout({ userName, userId, onLogout }: ChatLayoutProps) {
     if (!selectedChannel || selectedChannel.joined !== true) {
       // If coming from a route, try to join the channel automatically
       if (routeChannelId === currentChannelId && selectedChannel) {
-        handleJoinChannel(selectedChannel);
-        return;
+        // Check if we are already in the process of joining this channel
+        // by adding a guard to prevent multiple join attempts
+        const isJoining = sessionStorage.getItem(`joining_${currentChannelId}`);
+        if (!isJoining) {
+          // Mark that we're joining this channel to prevent loops
+          sessionStorage.setItem(`joining_${currentChannelId}`, "true");
+          handleJoinChannel(selectedChannel);
+          return;
+        }
       }
 
       console.log("Cannot load messages for unjoined channel");
       setMessages([]);
       return;
     }
+
+    // Clear the joining flag once we've successfully joined
+    sessionStorage.removeItem(`joining_${currentChannelId}`);
 
     // Update the URL to reflect the current channel
     navigate(`/channel/${currentChannelId}`, { replace: true });
@@ -220,10 +230,26 @@ export function ChatLayout({ userName, userId, onLogout }: ChatLayoutProps) {
       // After joining, refresh channels
       await fetchChannels();
 
-      // Select the joined channel
-      handleSelectChannel(channel.id);
+      // Update the channel in local state to reflect it's joined
+      setChannels((prevChannels) =>
+        prevChannels.map((c) =>
+          c.id === channel.id ? { ...c, joined: true } : c
+        )
+      );
+
+      // Set current channel
+      setCurrentChannelId(channel.id);
+      setCurrentChannelName(channel.name);
+
+      // Navigate to the channel with replace to avoid adding to history stack
+      navigate(`/channel/${channel.id}`, { replace: true });
+
+      // Clear the joining flag
+      sessionStorage.removeItem(`joining_${channel.id}`);
     } catch (error) {
       console.error("Failed to join channel:", error);
+      // Clear the joining flag in case of error too
+      sessionStorage.removeItem(`joining_${channel.id}`);
     }
   };
 
@@ -233,13 +259,21 @@ export function ChatLayout({ userName, userId, onLogout }: ChatLayoutProps) {
       const response = await API.createChannel(name);
       console.log("Channel created:", response.data);
 
-      // Refresh channels after creation
-      await fetchChannels();
+      // Create a new channel object with joined status
+      const newChannel = {
+        ...response.data,
+        joined: true,
+      };
 
-      // Select the newly created channel if available
-      if (response.data && response.data.id) {
-        handleSelectChannel(response.data.id);
-      }
+      // Update channels state directly
+      setChannels((prevChannels) => [...prevChannels, newChannel]);
+
+      // Set current channel
+      setCurrentChannelId(newChannel.id);
+      setCurrentChannelName(newChannel.name);
+
+      // Navigate directly with replace to avoid history stack issues
+      navigate(`/channel/${newChannel.id}`, { replace: true });
     } catch (error) {
       console.error("Failed to create channel:", error);
       throw error;
