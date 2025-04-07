@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
+import { useParams, useNavigate } from "react-router-dom";
 import { Button } from "../ui/button";
-import { Menu, LogOut, Users } from "lucide-react";
+import { Menu, LogOut } from "lucide-react";
 import { ChannelList } from "./ChannelList";
 import { CreateChannel } from "./CreateChannel";
 import { MessageList } from "./MessageList";
@@ -24,88 +25,100 @@ interface Message {
 }
 
 interface ChatLayoutProps {
+  userName: string | null;
   userId: string;
   onLogout: () => void;
 }
 
-export function ChatLayout({ userId, onLogout }: ChatLayoutProps) {
+export function ChatLayout({ userName, userId, onLogout }: ChatLayoutProps) {
+  const navigate = useNavigate();
+  const { channelId: routeChannelId } = useParams<{ channelId: string }>();
+
   const [channels, setChannels] = useState<Channel[]>([]);
-  const [allChannels, setAllChannels] = useState<Channel[]>([]);
   const [currentChannelId, setCurrentChannelId] = useState<string | null>(null);
   const [currentChannelName, setCurrentChannelName] = useState<string | null>(
     null
   );
   const [messages, setMessages] = useState<Message[]>([]);
-  const [showAllChannels, setShowAllChannels] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const { presence } = usePubNubContext();
 
-  // Fetch user channels
-  const fetchUserChannels = async () => {
-    try {
-      const response = await API.getUserChannels();
-      // Only set channels with joined=true from the response
-      const userChannels = response.data
-        .filter((channel: any) => channel.joined === true)
-        .map((channel: any) => ({
-          ...channel,
-          joined: true,
-        }));
-      setChannels(userChannels);
+  // Handle routing to a specific channel
+  useEffect(() => {
+    if (routeChannelId) {
+      // If we have a channel ID in the route, set it as the current channel
+      setCurrentChannelId(routeChannelId);
 
-      // Auto-select the first channel if none is selected
-      if (userChannels.length > 0 && !currentChannelId) {
-        handleSelectChannel(userChannels[0].id);
+      // Find channel name if channels are already loaded
+      const foundChannel = channels.find((c) => c.id === routeChannelId);
+      if (foundChannel) {
+        setCurrentChannelName(foundChannel.name);
       }
-    } catch (error) {
-      console.error("Failed to fetch user channels:", error);
     }
-  };
+  }, [routeChannelId, channels]);
 
-  // Fetch all available channels
-  const fetchAllChannels = async () => {
+  // Fetch channels and merge them into a single list
+  const fetchChannels = async () => {
     try {
-      const response = await API.getAllChannels();
-      const allChannelsList = response.data;
-
-      // Mark joined channels
-      const joinedChannelIds = channels.map((c) => c.id);
-      const markedChannels = allChannelsList.map((channel: any) => ({
+      // Fetch user joined channels
+      const userChannelsResponse = await API.getUserChannels();
+      const userChannels = userChannelsResponse.data.map((channel: any) => ({
         ...channel,
-        joined: joinedChannelIds.includes(channel.id),
+        joined: true,
       }));
 
-      setAllChannels(markedChannels);
+      // Fetch all available channels
+      const allChannelsResponse = await API.getAllChannels();
+      const allChannels = allChannelsResponse.data;
+
+      setChannels(allChannels);
+
+      // Auto-select the first joined channel if none is selected
+      if (userChannels.length > 0 && !currentChannelId && !routeChannelId) {
+        handleSelectChannel(userChannels[0].id);
+      }
+
+      // If we have a channel ID in the route, set the channel name
+      if (routeChannelId) {
+        const foundChannel = allChannels.find(
+          (c: Channel) => c.id === routeChannelId
+        );
+        if (foundChannel) {
+          setCurrentChannelName(foundChannel.name);
+        }
+      }
     } catch (error) {
-      console.error("Failed to fetch all channels:", error);
+      console.error("Failed to fetch channels:", error);
     }
   };
 
   // Fetch initial data
   useEffect(() => {
-    fetchUserChannels();
-    fetchAllChannels();
+    fetchChannels();
   }, []);
 
-  // Subscribe to channel when current channel changes
+  // Set up message listeners for current channel
   useEffect(() => {
     if (!currentChannelId) return;
 
     // Find the selected channel
-    const selectedChannel = [...channels, ...allChannels].find(
-      (c) => c.id === currentChannelId
-    );
+    const selectedChannel = channels.find((c) => c.id === currentChannelId);
 
     // Only proceed if the selected channel exists and user has joined it
     if (!selectedChannel || selectedChannel.joined !== true) {
+      // If coming from a route, try to join the channel automatically
+      if (routeChannelId === currentChannelId && selectedChannel) {
+        handleJoinChannel(selectedChannel);
+        return;
+      }
+
       console.log("Cannot load messages for unjoined channel");
       setMessages([]);
       return;
     }
 
-    // Unsubscribe from previous channels and subscribe to new one
-    const subscribedChannels = channels.map((c) => c.id);
-    pubnubClient.subscribe([currentChannelId]);
+    // Update the URL to reflect the current channel
+    navigate(`/channel/${currentChannelId}`, { replace: true });
 
     // Fetch message history
     const fetchMessages = async () => {
@@ -148,24 +161,22 @@ export function ChatLayout({ userId, onLogout }: ChatLayoutProps) {
       },
     });
 
-    return () => {
-      pubnubClient.unsubscribe(subscribedChannels);
-    };
+    // No need to manually subscribe/unsubscribe as the token has the necessary permissions
   }, [currentChannelId, channels]);
 
   // Handle channel selection
   const handleSelectChannel = (channelId: string) => {
     // Find the channel
-    const channel = [...channels, ...allChannels].find(
-      (c) => c.id === channelId
-    );
+    const channel = channels.find((c) => c.id === channelId);
 
-    // Only allow selecting joined channels
-    if (channel && channel.joined === true) {
-      setCurrentChannelId(channelId);
+    setCurrentChannelId(channelId);
+    if (channel) {
       setCurrentChannelName(channel.name);
-    } else {
-      console.log("Cannot select unjoined channel");
+
+      // If it's a joined channel, navigate to it
+      if (channel.joined === true) {
+        navigate(`/channel/${channelId}`);
+      }
     }
   };
 
@@ -174,15 +185,11 @@ export function ChatLayout({ userId, onLogout }: ChatLayoutProps) {
     try {
       await API.joinChannel(channel.id);
 
-      // After joining, refresh user channels and select the joined channel
-      await fetchUserChannels();
-      await fetchAllChannels();
+      // After joining, refresh channels
+      await fetchChannels();
 
       // Select the joined channel
       handleSelectChannel(channel.id);
-
-      // Switch back to user channels
-      setShowAllChannels(false);
     } catch (error) {
       console.error("Failed to join channel:", error);
     }
@@ -195,11 +202,12 @@ export function ChatLayout({ userId, onLogout }: ChatLayoutProps) {
       console.log("Channel created:", response.data);
 
       // Refresh channels after creation
-      await fetchUserChannels();
-      await fetchAllChannels();
+      await fetchChannels();
 
-      // Switch to My Channels view after creation
-      setShowAllChannels(false);
+      // Select the newly created channel if available
+      if (response.data && response.data.id) {
+        handleSelectChannel(response.data.id);
+      }
     } catch (error) {
       console.error("Failed to create channel:", error);
       throw error;
@@ -232,23 +240,14 @@ export function ChatLayout({ userId, onLogout }: ChatLayoutProps) {
 
       {/* Sidebar */}
       <div
-        className={`w-64 border-r flex-shrink-0 flex flex-col ${
+        className={`w-64 border-r flex-shrink-0 flex flex-col h-full ${
           sidebarOpen ? "block" : "hidden lg:block"
         }`}
       >
         {/* Sidebar header */}
-        <div className="h-14 border-b flex items-center justify-between px-4">
+        <div className="h-14 border-b flex items-center justify-between px-4 flex-shrink-0">
           <div className="font-semibold">Chat App</div>
           <div className="flex items-center gap-2">
-            <Button
-              variant="ghost"
-              size="icon"
-              title="Toggle channel view"
-              onClick={() => setShowAllChannels(!showAllChannels)}
-            >
-              <Users className="h-5 w-5" />
-            </Button>
-
             <Button
               variant="ghost"
               size="icon"
@@ -261,41 +260,23 @@ export function ChatLayout({ userId, onLogout }: ChatLayoutProps) {
         </div>
 
         {/* User info */}
-        <div className="px-4 py-2 border-b">
+        <div className="px-4 py-2 border-b flex-shrink-0">
           <p className="font-medium text-sm">Logged in as:</p>
-          <p className="text-primary font-bold">{userId}</p>
+          <p className="text-primary font-bold">{userName || userId}</p>
         </div>
 
         {/* Create channel button */}
-        <div className="p-2">
+        <div className="p-2 flex-shrink-0">
           <CreateChannel onCreateChannel={handleCreateChannel} />
         </div>
 
-        {/* Channel tabs */}
-        <div className="px-2 py-1 flex text-sm border-b">
-          <Button
-            variant={!showAllChannels ? "default" : "ghost"}
-            className="flex-1 h-8 text-xs"
-            onClick={() => setShowAllChannels(false)}
-          >
-            My Channels
-          </Button>
-          <Button
-            variant={showAllChannels ? "default" : "ghost"}
-            className="flex-1 h-8 text-xs"
-            onClick={() => setShowAllChannels(true)}
-          >
-            All Channels
-          </Button>
-        </div>
-
-        {/* Channel list */}
-        <div className="flex-1 overflow-y-auto">
+        {/* Channels container with all channels in one list component */}
+        <div className="flex flex-col overflow-auto flex-grow">
           <ChannelList
-            channels={showAllChannels ? allChannels : channels}
+            channels={channels}
             currentChannelId={currentChannelId}
             onSelectChannel={handleSelectChannel}
-            onJoinChannel={showAllChannels ? handleJoinChannel : undefined}
+            onJoinChannel={handleJoinChannel}
           />
         </div>
       </div>

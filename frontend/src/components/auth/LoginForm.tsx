@@ -12,7 +12,7 @@ import { Button } from "../ui/button";
 import { API } from "../../lib/api";
 
 interface LoginFormProps {
-  onLogin: (userId: string, authToken: string) => void;
+  onLogin: (userId: string, authToken: string, name: string) => void;
 }
 
 export function LoginForm({ onLogin }: LoginFormProps) {
@@ -34,7 +34,7 @@ export function LoginForm({ onLogin }: LoginFormProps) {
     try {
       const response = await API.login(username);
       const { id, token } = response.data;
-      onLogin(id, token);
+      onLogin(id, token, username);
     } catch (err: any) {
       console.error("Login error:", err);
       setError(
