@@ -35,34 +35,42 @@ export function ChannelList({
       {channels.map((channel) => {
         const isActive = channel.id === currentChannelId;
         const occupancy = presence[channel.id] || 0;
+        const isJoined = channel.joined === true;
 
         return (
           <div
             key={channel.id}
-            className={`flex items-center justify-between rounded-md px-3 py-2 cursor-pointer hover:bg-secondary transition-colors ${
-              isActive ? "bg-secondary" : ""
+            className={`flex items-center justify-between rounded-md px-3 py-2 cursor-pointer transition-colors ${
+              isActive
+                ? "bg-primary/10 text-primary"
+                : isJoined
+                ? "hover:bg-secondary"
+                : "opacity-70 hover:bg-secondary/50"
             }`}
-            onClick={() =>
-              channel.joined ? onSelectChannel(channel.id) : undefined
-            }
+            onClick={() => (isJoined ? onSelectChannel(channel.id) : undefined)}
           >
             <div className="flex flex-col">
-              <div className="font-medium">{channel.name}</div>
+              <div className="font-medium truncate max-w-[120px]">
+                {channel.name}
+              </div>
               <div className="text-xs text-muted-foreground">
                 {occupancy} {occupancy === 1 ? "member" : "members"}
               </div>
             </div>
 
-            {!channel.joined && onJoinChannel && (
+            {/* Only show Join button if onJoinChannel is provided and channel is not joined */}
+            {onJoinChannel && (
               <Button
-                variant="outline"
+                variant="secondary"
                 size="sm"
+                className="ml-2 h-8"
                 onClick={(e) => {
                   e.stopPropagation();
                   onJoinChannel(channel);
                 }}
+                disabled={isJoined}
               >
-                Join
+                {isJoined ? "Joined" : "Join"}
               </Button>
             )}
           </div>

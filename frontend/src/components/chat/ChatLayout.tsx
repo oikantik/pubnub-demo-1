@@ -38,16 +38,19 @@ export function ChatLayout({ userId, onLogout }: ChatLayoutProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [showAllChannels, setShowAllChannels] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const { presence, refreshToken } = usePubNubContext();
+  const { presence } = usePubNubContext();
 
   // Fetch user channels
   const fetchUserChannels = async () => {
     try {
       const response = await API.getUserChannels();
-      const userChannels = response.data.map((channel: any) => ({
-        ...channel,
-        joined: true,
-      }));
+      // Only set channels with joined=true from the response
+      const userChannels = response.data
+        .filter((channel: any) => channel.joined === true)
+        .map((channel: any) => ({
+          ...channel,
+          joined: true,
+        }));
       setChannels(userChannels);
 
       // Auto-select the first channel if none is selected
@@ -88,6 +91,18 @@ export function ChatLayout({ userId, onLogout }: ChatLayoutProps) {
   useEffect(() => {
     if (!currentChannelId) return;
 
+    // Find the selected channel
+    const selectedChannel = [...channels, ...allChannels].find(
+      (c) => c.id === currentChannelId
+    );
+
+    // Only proceed if the selected channel exists and user has joined it
+    if (!selectedChannel || selectedChannel.joined !== true) {
+      console.log("Cannot load messages for unjoined channel");
+      setMessages([]);
+      return;
+    }
+
     // Unsubscribe from previous channels and subscribe to new one
     const subscribedChannels = channels.map((c) => c.id);
     pubnubClient.subscribe([currentChannelId]);
@@ -100,8 +115,8 @@ export function ChatLayout({ userId, onLogout }: ChatLayoutProps) {
         // Transform messages to match our format
         const formattedMessages = response.data.map((msg: any) => ({
           id: msg.id,
-          sender: msg.sender,
-          content: msg.message,
+          sender: msg.sender_id || msg.sender,
+          content: msg.text || msg.message,
           timestamp: msg.timestamp,
         }));
 
@@ -131,10 +146,6 @@ export function ChatLayout({ userId, onLogout }: ChatLayoutProps) {
           ]);
         }
       },
-      onTokenRefresh: () => {
-        // Resubscribe after token refresh
-        pubnubClient.subscribe([currentChannelId]);
-      },
     });
 
     return () => {
@@ -144,14 +155,17 @@ export function ChatLayout({ userId, onLogout }: ChatLayoutProps) {
 
   // Handle channel selection
   const handleSelectChannel = (channelId: string) => {
-    setCurrentChannelId(channelId);
-
-    // Find channel name
+    // Find the channel
     const channel = [...channels, ...allChannels].find(
       (c) => c.id === channelId
     );
-    if (channel) {
+
+    // Only allow selecting joined channels
+    if (channel && channel.joined === true) {
+      setCurrentChannelId(channelId);
       setCurrentChannelName(channel.name);
+    } else {
+      console.log("Cannot select unjoined channel");
     }
   };
 
@@ -163,9 +177,6 @@ export function ChatLayout({ userId, onLogout }: ChatLayoutProps) {
       // After joining, refresh user channels and select the joined channel
       await fetchUserChannels();
       await fetchAllChannels();
-
-      // Get a fresh PubNub token with updated permissions
-      await refreshToken();
 
       // Select the joined channel
       handleSelectChannel(channel.id);
@@ -180,14 +191,15 @@ export function ChatLayout({ userId, onLogout }: ChatLayoutProps) {
   // Handle creating a channel
   const handleCreateChannel = async (name: string) => {
     try {
-      await API.createChannel(name);
+      const response = await API.createChannel(name);
+      console.log("Channel created:", response.data);
 
       // Refresh channels after creation
       await fetchUserChannels();
       await fetchAllChannels();
 
-      // Get a fresh PubNub token with new permissions
-      await refreshToken();
+      // Switch to My Channels view after creation
+      setShowAllChannels(false);
     } catch (error) {
       console.error("Failed to create channel:", error);
       throw error;
@@ -215,7 +227,7 @@ export function ChatLayout({ userId, onLogout }: ChatLayoutProps) {
         className="absolute top-4 left-4 lg:hidden z-10"
         onClick={() => setSidebarOpen(!sidebarOpen)}
       >
-        <Menu />
+        <Menu className="h-5 w-5" />
       </Button>
 
       {/* Sidebar */}
@@ -262,7 +274,7 @@ export function ChatLayout({ userId, onLogout }: ChatLayoutProps) {
         {/* Channel tabs */}
         <div className="px-2 py-1 flex text-sm border-b">
           <Button
-            variant={showAllChannels ? "ghost" : "default"}
+            variant={!showAllChannels ? "default" : "ghost"}
             className="flex-1 h-8 text-xs"
             onClick={() => setShowAllChannels(false)}
           >

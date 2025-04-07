@@ -40,7 +40,9 @@ export class API {
   };
 
   static getUserChannels = () => {
-    return apiClient.get("/v1/users/channels");
+    // Use /v1/channels endpoint to get all channels
+    // The backend will filter to show only user's channels based on the auth token
+    return apiClient.get("/v1/channels");
   };
 
   // Channels
@@ -49,7 +51,7 @@ export class API {
   };
 
   static createChannel = (name: string) => {
-    return apiClient.post("/v1/channels", { name });
+    return apiClient.post("/v1/users/channels", { name });
   };
 
   static joinChannel = (channelId: string) => {
@@ -57,7 +59,7 @@ export class API {
   };
 
   static getChannelMessages = (channelId: string) => {
-    return apiClient.get(`/v1/channels/${channelId}/messages`);
+    return apiClient.get(`/v1/channels/${channelId}/history`);
   };
 
   static getChannelPresence = (channelId: string) => {
@@ -65,13 +67,13 @@ export class API {
   };
 
   // Messages
-  static sendMessage = (channelId: string, message: string) => {
-    return apiClient.post(`/v1/channels/${channelId}/messages`, { message });
+  static sendMessage = (channelId: string, text: string) => {
+    return apiClient.post("/v1/messages", { channel_id: channelId, text });
   };
 
-  // PubNub tokens
+  // PubNub tokens - this should only be called when initializing PubNub provider
   static getPubnubToken = () => {
-    return apiClient.post("/v1/tokens/pubnub");
+    return apiClient.post("/v1/tokens/pubnub", {});
   };
 }
 

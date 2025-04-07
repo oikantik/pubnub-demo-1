@@ -99,12 +99,14 @@ export function MessageInput({
         onKeyDown={handleKeyDown}
         placeholder="Type a message"
         disabled={disabled || !channelId}
-        className="min-h-[60px] max-h-[120px] resize-none"
+        className="min-h-[60px] max-h-[120px] resize-none focus-visible:ring-1 focus-visible:ring-offset-1"
       />
       <Button
         type="submit"
+        variant="default"
         size="icon"
         disabled={!message.trim() || disabled || !channelId}
+        className="h-10 w-10"
       >
         <Send className="h-5 w-5" />
       </Button>

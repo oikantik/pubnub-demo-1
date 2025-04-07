@@ -33,8 +33,8 @@ export function LoginForm({ onLogin }: LoginFormProps) {
 
     try {
       const response = await API.login(username);
-      const { user_id, token } = response.data;
-      onLogin(user_id, token);
+      const { id, token } = response.data;
+      onLogin(id, token);
     } catch (err: any) {
       console.error("Login error:", err);
       setError(
@@ -71,7 +71,11 @@ export function LoginForm({ onLogin }: LoginFormProps) {
                   autoFocus
                 />
               </div>
-              <Button type="submit" disabled={isLoading || !username.trim()}>
+              <Button
+                type="submit"
+                disabled={isLoading || !username.trim()}
+                className="w-full"
+              >
                 {isLoading ? "Signing in..." : "Sign In"}
               </Button>
             </div>

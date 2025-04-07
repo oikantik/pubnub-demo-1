@@ -33,11 +33,12 @@ export function CreateChannel({ onCreateChannel }: CreateChannelProps) {
   if (!isFormVisible) {
     return (
       <Button
-        variant="ghost"
-        className="w-full justify-start mb-2"
+        variant="outline"
+        className="w-full justify-start mb-2 gap-2"
         onClick={() => setIsFormVisible(true)}
+        size="sm"
       >
-        <PlusCircle className="mr-2 h-4 w-4" />
+        <PlusCircle className="h-4 w-4" />
         Create Channel
       </Button>
     );
@@ -50,6 +51,7 @@ export function CreateChannel({ onCreateChannel }: CreateChannelProps) {
         onChange={(e) => setChannelName(e.target.value)}
         placeholder="Channel name"
         disabled={isCreating}
+        className="h-9"
         autoFocus
       />
       <div className="flex space-x-2">
@@ -57,6 +59,7 @@ export function CreateChannel({ onCreateChannel }: CreateChannelProps) {
           type="submit"
           disabled={!channelName.trim() || isCreating}
           size="sm"
+          className="w-full"
         >
           {isCreating ? "Creating..." : "Create"}
         </Button>

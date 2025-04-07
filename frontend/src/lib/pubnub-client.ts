@@ -6,15 +6,11 @@ const PUBNUB_PUBLISH_KEY =
 const PUBNUB_SUBSCRIBE_KEY =
   import.meta.env.VITE_PUBNUB_SUBSCRIBE_KEY || "sub-c-your-subscribe-key";
 
-// Token update channel constant
-const TOKEN_UPDATES = "token-updates";
-
 interface PubNubListenerParams {
   onMessage?: (channel: string, message: any) => void;
   onTypingStart?: (channel: string, sender: string) => void;
   onTypingEnd?: (channel: string, sender: string) => void;
   onPresence?: (presenceEvent: any) => void;
-  onTokenRefresh?: () => void;
   onError?: (error: any) => void;
 }
 
@@ -42,7 +38,7 @@ export class PubNubClient {
     this.userId = userId;
 
     try {
-      // Get a fresh token from the API
+      // Get a fresh token from the API - THIS IS THE ONLY PLACE WE CALL THE TOKEN API
       const response = await API.getPubnubToken();
       const pubnubToken = response.data.token;
 
@@ -78,43 +74,12 @@ export class PubNubClient {
     return this.client;
   }
 
-  // Refresh PubNub token
-  public async refreshToken(): Promise<void> {
-    if (!this.client || !this.userId) return;
-
-    try {
-      const response = await API.getPubnubToken();
-      const pubnubToken = response.data.token;
-
-      // Need to recreate the client with the new token
-      const config = {
-        publishKey: PUBNUB_PUBLISH_KEY,
-        subscribeKey: PUBNUB_SUBSCRIBE_KEY,
-        uuid: this.userId,
-        authKey: pubnubToken,
-        heartbeatInterval: 30,
-        presenceTimeout: 60,
-      };
-
-      // First clean up the old client
-      if (this.client) {
-        this.client.unsubscribeAll();
-      }
-
-      // Initialize with new token
-      this.client = new PubNub(config);
-      console.log("PubNub token refreshed");
-    } catch (error) {
-      console.error("Failed to refresh PubNub token:", error);
-    }
-  }
-
   // Subscribe to channels
   public subscribe(channels: string[]): void {
     if (!this.client) return;
 
     this.client.subscribe({
-      channels: [...channels, TOKEN_UPDATES],
+      channels,
       withPresence: true,
     });
   }
@@ -144,31 +109,6 @@ export class PubNubClient {
       });
     } catch (error: any) {
       console.error("Failed to send message:", error);
-      // If token expired, refresh and try again
-      if (
-        error &&
-        error.status &&
-        error.status.category === "PNAccessDeniedCategory"
-      ) {
-        await this.refreshToken();
-        // Retry sending the message once
-        try {
-          await this.client?.publish({
-            channel,
-            message: {
-              type: "message",
-              content: message,
-              sender: this.userId,
-              timestamp: Math.floor(Date.now() / 1000),
-            },
-          });
-        } catch (retryError) {
-          console.error(
-            "Failed to send message after token refresh:",
-            retryError
-          );
-        }
-      }
     }
   }
 
@@ -220,7 +160,6 @@ export class PubNubClient {
     onTypingStart,
     onTypingEnd,
     onPresence,
-    onTokenRefresh,
     onError,
   }: PubNubListenerParams): void {
     if (!this.client) return;
@@ -230,17 +169,6 @@ export class PubNubClient {
 
     this.client.addListener({
       message: (event) => {
-        // Handle token refresh notifications
-        if (event.channel === TOKEN_UPDATES) {
-          const data = event.message;
-          if (data.event === "token_refresh" && data.user_id === this.userId) {
-            console.log("Token refresh notification received");
-            this.refreshToken();
-            onTokenRefresh?.();
-          }
-          return;
-        }
-
         // Handle regular messages
         if (onMessage) {
           onMessage(event.channel, event.message);
@@ -271,8 +199,6 @@ export class PubNubClient {
           if (onError) {
             onError(statusEvent);
           }
-          // Try refreshing the token on access issues
-          this.refreshToken();
         }
       },
     });

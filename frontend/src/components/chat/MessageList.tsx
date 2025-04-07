@@ -65,7 +65,7 @@ export function MessageList({
                   className={`max-w-[80%] rounded-lg px-4 py-2 ${
                     isCurrentUser
                       ? "bg-primary text-primary-foreground"
-                      : "bg-secondary"
+                      : "bg-muted"
                   }`}
                 >
                   {!isCurrentUser && (

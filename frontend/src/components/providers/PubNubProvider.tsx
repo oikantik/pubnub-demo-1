@@ -6,7 +6,6 @@ import pubnubClient from "../../lib/pubnub-client";
 interface PubNubContextType {
   isInitialized: boolean;
   isConnected: boolean;
-  refreshToken: () => Promise<void>;
   typingUsers: Record<string, string[]>;
   startTyping: (channel: string) => void;
   stopTyping: (channel: string) => void;
@@ -16,7 +15,6 @@ interface PubNubContextType {
 const PubNubContext = createContext<PubNubContextType>({
   isInitialized: false,
   isConnected: false,
-  refreshToken: async () => {},
   typingUsers: {},
   startTyping: () => {},
   stopTyping: () => {},
@@ -50,6 +48,7 @@ export const PubNubProvider: React.FC<PubNubProviderProps> = ({
       }
 
       try {
+        // Only get the token when initializing PubNub provider
         const pubnub = await pubnubClient.initialize(userId);
         setClient(pubnub);
         setIsInitialized(true);
@@ -125,18 +124,10 @@ export const PubNubProvider: React.FC<PubNubProviderProps> = ({
     }
   };
 
-  // Refresh token helper
-  const refreshToken = async () => {
-    if (isInitialized && userId) {
-      await pubnubClient.refreshToken();
-    }
-  };
-
   // Context value
   const contextValue: PubNubContextType = {
     isInitialized,
     isConnected,
-    refreshToken,
     typingUsers,
     startTyping,
     stopTyping,
