@@ -335,25 +335,12 @@ Authorization: Bearer <token>
 
 **Endpoint**: `POST /v1/tokens/pubnub`
 
-**Purpose**: Generate a PubNub access token for real-time messaging.
+**Purpose**: Generate a PubNub access token for real-time messaging. When a token is needed, clients should call this endpoint to get a fresh token.
 
 **Response Example**:
 ```json
 {
   "token": "pubnub-token-string"
-}
-```
-
-#### Refresh PubNub Token
-
-**Endpoint**: `PUT /v1/tokens/refresh`
-
-**Purpose**: Force a refresh of the PubNub access token.
-
-**Response Example**:
-```json
-{
-  "token": "new-pubnub-token-string"
 }
 ```
 
@@ -533,4 +520,103 @@ The application initialization follows this sequence:
    - PubNub client is initialized with admin credentials
 
 5. **API Startup**:
-   - Grape API is mounted and ready to accept requests 
+   - Grape API is mounted and ready to accept requests
+
+## Frontend PubNub Integration Guide
+
+### Initial Token Acquisition
+
+When a frontend application first loads, it should:
+
+1. Authenticate with the API (`/v1/users/login`) to get an API token
+2. Request a PubNub token from the `/v1/tokens/pubnub` endpoint
+3. Initialize the PubNub client with this token
+
+### Handling Token Expiration
+
+When a PubNub token expires, the client will receive a 403 error from PubNub. To handle this:
+
+1. Catch PubNub API errors in your application
+2. When a 403 error occurs, request a new token from `/v1/tokens/pubnub`
+3. Update the PubNub client with the new token using the `setToken()` method (varies by SDK)
+4. Retry the failed operation
+
+Example code for handling token expiration in JavaScript:
+
+```javascript
+// PubNub error handler
+pubnub.addListener({
+  status: function(statusEvent) {
+    if (statusEvent.category === 'PNAccessDeniedCategory') {
+      // Token expired or invalid
+      refreshPubNubToken().then(() => {
+        // Reconnect PubNub with new token
+        pubnub.reconnect();
+      });
+    }
+  }
+});
+
+async function refreshPubNubToken() {
+  try {
+    const response = await fetch('/api/v1/tokens/pubnub', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiToken}`
+      }
+    });
+    
+    if (response.ok) {
+      const data = await response.json();
+      // Update PubNub with new token
+      pubnub.setToken(data.token);
+      return true;
+    }
+    return false;
+  } catch (error) {
+    console.error('Failed to refresh PubNub token:', error);
+    return false;
+  }
+}
+```
+
+### Managing Channel Permissions
+
+When a user creates or joins a channel, the server automatically updates their PubNub token permissions. However, the client still needs to:
+
+1. Request a new token after joining or creating a channel to get the updated permissions
+2. Update the PubNub client with the new token
+
+To handle this in your frontend:
+
+```javascript
+async function joinChannel(channelId) {
+  try {
+    // Join the channel through API
+    const joinResponse = await fetch(`/api/v1/channels/${channelId}/join`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiToken}`
+      }
+    });
+    
+    if (joinResponse.ok) {
+      // Get a fresh token with updated permissions
+      await refreshPubNubToken();
+      
+      // Subscribe to the channel with the new token
+      pubnub.subscribe({
+        channels: [channelId]
+      });
+      
+      return true;
+    }
+    return false;
+  } catch (error) {
+    console.error('Failed to join channel:', error);
+    return false;
+  }
+}
+```
+
+For more information, refer to the [PubNub Access Manager Documentation](https://www.pubnub.com/docs/general/security/access-control). 
