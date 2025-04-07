@@ -22,3 +22,10 @@ gem "rake", "~> 13.0"
 
 gem "rack", "~> 2.2"
 gem "rackup", "~> 1.0.0"
+gem "webrick", "~> 1.8"
+
+# Development and testing
+group :development do
+  gem "guard", "~> 2.18"
+  gem "guard-rack", "~> 2.2"
+end

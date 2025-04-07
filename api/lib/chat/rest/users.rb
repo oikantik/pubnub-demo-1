@@ -25,22 +25,9 @@ module Chat::REST
         end
 
         begin
-          # Generate PubNub token for the user with a forced refresh
-          pubnub_token = Chat::Services::Pubnub.instance.generate_token(user.id, true)
-
-          unless pubnub_token
-            # For demo purposes, if token generation fails, use a dummy token
-            # Generate a temporary dummy token for testing
-            pubnub_token = "demo-token-#{SecureRandom.hex(8)}"
-            # Cache it in Redis
-            Chat::Services::Redis.set_pubnub_token(user.id, pubnub_token)
-            Chat::Services::Redis.set_user_token(user.id, pubnub_token)
-          end
-
           # Prepare and return the response
           response = present_with(user, Chat::REST::Representers::User).merge(
-            token: token,
-            pubnub_token: pubnub_token
+            token: token
           )
 
           response
@@ -56,14 +43,6 @@ module Chat::REST
         # Get current token
         auth_token = request.headers['Authorization']&.split(' ')&.last
         if auth_token
-          # Get PubNub token for user
-          pubnub_token = Chat::Services::Redis.get_pubnub_token(current_user.id)
-
-          # Revoke PubNub token if exists
-          if pubnub_token
-            Chat::Services::Pubnub.instance.revoke_token(pubnub_token)
-          end
-
           # Logout user
           Chat::Services::User.logout(current_user)
         end

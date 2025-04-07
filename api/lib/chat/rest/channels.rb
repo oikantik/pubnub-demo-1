@@ -158,6 +158,33 @@ module Chat::REST
           error!("Failed to fetch channel history: #{e.message}", 500)
         end
       end
+
+      desc 'Get presence information for a channel'
+      params do
+        requires :id, type: String, desc: 'The channel ID to check presence for'
+      end
+      get ':id/presence' do
+        begin
+          channel = Chat::Models::Channel[params[:id]]
+          error!('Channel not found', 404) unless channel
+
+          # Check if user is a member
+          is_member = Chat::Services::Channel.is_member?(channel, current_user)
+          error!('You are not a member of this channel', 403) unless is_member
+
+          # Get presence information from PubNub
+          token = request.headers['Authorization']&.split(' ')&.last
+          uuids = Chat::Services::Pubnub.instance.presence_on_channel(channel.id.to_s, auth_token: token)
+
+          if uuids.nil?
+            error!('Failed to get presence information', 500)
+          end
+
+          { uuids: uuids }
+        rescue => e
+          error!("Failed to get presence information: #{e.message}", 500)
+        end
+      end
     end
   end
 end

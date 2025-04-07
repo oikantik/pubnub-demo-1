@@ -97,7 +97,7 @@ curl_and_format -H "Authorization: Bearer $TOKEN" "$API_HOST/v1/channels/$CHANNE
 
 # Step 8: Check presence
 echo -e "\n== Checking Presence =="
-curl_and_format -H "Authorization: Bearer $TOKEN" "$API_HOST/v1/presence?channel=$CHANNEL_ID"
+curl_and_format -H "Authorization: Bearer $TOKEN" "$API_HOST/v1/channels/$CHANNEL_ID/presence"
 
 # Step 9: Generate PubNub token
 echo -e "\n== Generating PubNub Token =="

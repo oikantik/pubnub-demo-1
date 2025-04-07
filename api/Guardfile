@@ -1,0 +1,19 @@
+# frozen_string_literal: true
+
+watch(/.*/) {|m| puts "#{m[0]} changed" }
+
+group :server do
+  # Restart the Rack server when certain files change
+  guard 'rack', port: 9292 do
+    # Watch all ruby files for changes
+    watch(%r{^config\.ru$})
+    watch(%r{^boot\.rb$})
+    watch(%r{^lib/.*\.rb$})
+
+    # Restart if Gemfile changes
+    watch('Gemfile.lock')
+
+    # Reload if the Rakefile changes
+    watch('Rakefile')
+  end
+end

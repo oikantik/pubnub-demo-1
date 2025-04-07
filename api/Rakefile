@@ -55,3 +55,16 @@ namespace :test do
     end
   end
 end
+
+namespace :dev do
+  desc 'Start the server in development mode with hot reloading'
+  task :server do
+    begin
+      # Check if Guard is installed
+      require 'guard'
+      require 'guard/commander'
+
+      Guard.start(group: ['server'])
+    end
+  end
+end

@@ -14,20 +14,22 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    restart: on-failure
+    entrypoint: /app/entry.sh
 
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    ports:
-      - "5173:5173"
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-    env_file:
-      - .env
-    depends_on:
-      - api
+  # frontend:
+  #   build:
+  #     context: ./frontend
+  #     dockerfile: Dockerfile
+  #   ports:
+  #     - "5173:5173"
+  #   volumes:
+  #     - ./frontend:/app
+  #     - /app/node_modules
+  #   env_file:
+  #     - .env
+  #   depends_on:
+  #     - api
 
   postgres:
     image: postgres:16-alpine
@@ -38,13 +40,13 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: chat_development
     ports:
-      - "5433:5432"
+      - "5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
       timeout: 5s
-      retries: 5
-      start_period: 5s
+      retries: 10
+      start_period: 10s
     # Initialize PostgreSQL with the UUID extension
     command: postgres -c 'shared_preload_libraries=pg_stat_statements' -c 'pg_stat_statements.track=all' -c 'pg_stat_statements.max=10000' -c 'track_activity_query_size=2048'
 
