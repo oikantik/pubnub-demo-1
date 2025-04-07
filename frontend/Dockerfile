@@ -10,6 +10,6 @@ COPY . .
 
 RUN npm run build
 
-EXPOSE 4173
-
-CMD ["npm", "run", "preview", "--", "--host", "0.0.0.0"] 
+EXPOSE 5173
+# Start your frontend application
+CMD [ "npm", "run", "dev", "--", "--host", "0.0.0.0"]
