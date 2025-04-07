@@ -16,40 +16,14 @@ module Chat
       # Singleton implementation
       include Singleton
 
-      # Initialize the service
-      def initialize
-        # Initialization code without logging
-      end
-
-      # @return [::Pubnub] PubNub admin client with full permissions
-      def admin_client
-        @admin_client ||= begin
-          client = ::Pubnub.new(
-            subscribe_key: ENV['PUBNUB_SUBSCRIBE_KEY'],
-            publish_key: ENV['PUBNUB_PUBLISH_KEY'],
-            secret_key: ENV['PUBNUB_SECRET_KEY'],
-            uuid: 'server-admin',
-            ssl: true
-          )
-          client
-        end
-      rescue => e
-        nil
-      end
-
-      # Get PubNub client for a specific user's auth token
+      # Get cached token for user or generate a new one
       #
-      # @param user_id [String] The user ID to get client for
-      # @return [::Pubnub] PubNub client configured with user's token
-      def pubnub_client_for_user(user_id)
-        ::Pubnub.new(
-          subscribe_key: ENV['PUBNUB_SUBSCRIBE_KEY'],
-          publish_key: ENV['PUBNUB_PUBLISH_KEY'],
-          uuid: user_id.to_s,
-          ssl: true
-        )
-      rescue => e
-        raise e
+      # @param user_id [String] User ID to get token for
+      # @param force_refresh [Boolean] Whether to force refresh the token
+      # @return [String, nil] Valid token or nil
+      def token_for_user(user_id, force_refresh = false)
+        return cached_token_for_user(user_id) unless force_refresh
+        generate_token(user_id)
       end
 
       # Publish a message to a channel
@@ -59,18 +33,11 @@ module Chat
       # @param user_id [String, nil] User ID to associate with the publish (for auth token)
       # @return [Boolean] Success or failure
       def publish(channel:, message:, user_id: nil)
-        # Get client for user or admin client
-        pubnub = user_id ? pubnub_client_for_user(user_id) : admin_client
+        client = client_for_publish(user_id)
+        return false unless client
 
-        # Publish message
-        result = pubnub.publish(
-          channel: channel,
-          message: message,
-          store: false,
-          http_sync: true
-        )
-
-        handle_result(result, "Error publishing to PubNub")
+        result = publish_to_channel(client, channel, message)
+        handle_result(result)
       end
 
       # Publish a message to its channel
@@ -78,10 +45,7 @@ module Chat
       # @param message [Chat::Models::Message] Message object to publish
       # @return [Boolean] Success or failure
       def publish_message(message)
-        representer = Chat::REST::Representers::Message.new(message)
-        message_data = representer.to_hash
-        message_data[:event] = 'new_message'
-
+        message_data = prepare_message_data(message)
         publish(
           channel: message.channel_id.to_s,
           message: message_data,
@@ -95,25 +59,13 @@ module Chat
       # @param auth_token [String] Authentication token for the request
       # @return [Array, nil] Array of UUIDs present in the channel or nil on error
       def presence_on_channel(channel, auth_token:)
-        # Get user from token
         user_id = Chat::Services::Redis.get_user_from_token(auth_token)
         return nil unless user_id
 
-        # Get client for user
-        pubnub = pubnub_client_for_user(user_id)
+        client = pubnub_client_for_user(user_id)
+        return nil unless client
 
-        # Request presence information
-        channel_presence_future = pubnub.here_now(
-          channel: channel
-        )
-
-        # Extract result (blocking call)
-        channel_presence = channel_presence_future.value
-        uuids = channel_presence.result[:data][:uuids]
-
-        uuids
-      rescue StandardError => e
-        nil
+        fetch_presence_for_channel(client, channel)
       end
 
       # Grant access to a specific channel for a user
@@ -123,12 +75,8 @@ module Chat
       # @param channel_id [Integer, String] Channel ID to grant access to
       # @return [Boolean] Success or failure of the operation
       def grant_channel_access(user_id, channel_id)
-        # Generate a new token with the updated permissions
-        # This will include all channels the user has access to
-        new_token = generate_token(user_id)
-        return false unless new_token
-
-        true
+        token = generate_token(user_id, true)
+        !token.nil?
       end
 
       # Revoke a token
@@ -136,14 +84,11 @@ module Chat
       # @param token [String] The token to revoke
       # @return [Boolean] Success or failure
       def revoke_token(token)
-        # Get user ID from token
         user_id = Chat::Services::Redis.get_user_from_token(token)
         return false unless user_id
 
-        # Delete token from Redis
         Chat::Services::Redis.delete("auth:#{token}")
         Chat::Services::Redis.delete("pubnub:#{user_id}")
-
         true
       end
 
@@ -152,59 +97,145 @@ module Chat
       # Tokens are cached in Redis with the appropriate TTL
       #
       # @param user_id [String] User ID to generate token for
-      # @param force_refresh [Boolean] If true, generate a new token even if one exists in cache
+      # @param force_refresh [Boolean] Whether to force a new token regardless of cache
       # @return [String, nil] Generated token or nil if failure
       def generate_token(user_id, force_refresh = false)
-        return cached_token_for_user(user_id) unless force_refresh
-
-        user = Chat::Models::User[user_id]
-        return nil unless user
-
-        # Get channel permissions
-        channels_with_permissions = channels_for_user(user)
-
-        # Skip token generation if user has no channels
-        if channels_with_permissions.empty?
-          log_message("User #{user_id} has no channels, skipping token generation")
-          return nil
+        # Check cache first if not forcing refresh
+        unless force_refresh
+          cached = cached_token_for_user(user_id)
+          return cached if cached
         end
 
-        # Verify necessary configuration is present
-        return nil unless validate_pubnub_config
+        user = find_user(user_id)
+        return nil unless user
+
+        channels_with_permissions = channels_for_user(user)
+        return nil if channels_with_permissions.empty?
+
         return nil unless admin_client
 
-        # Generate token from PubNub API
         token_request = request_token(user_id, channels_with_permissions)
         process_token_result(user_id, token_request)
-      rescue => e
-        log_error("Exception in PubNub token generation", e)
-        raise e
+      rescue
+        nil
       end
 
       private
+
+      # @return [::Pubnub] PubNub admin client with full permissions
+      def admin_client
+        @admin_client ||= begin
+          return nil unless validate_pubnub_config
+
+          ::Pubnub.new(
+            subscribe_key: ENV['PUBNUB_SUBSCRIBE_KEY'],
+            publish_key: ENV['PUBNUB_PUBLISH_KEY'],
+            secret_key: ENV['PUBNUB_SECRET_KEY'],
+            uuid: 'server-admin',
+            ssl: true
+          )
+        rescue
+          nil
+        end
+      end
+
+      # Get PubNub client for a specific user's auth token
+      #
+      # @param user_id [String] The user ID to get client for
+      # @return [::Pubnub, nil] PubNub client configured with user's token
+      def pubnub_client_for_user(user_id)
+        return nil unless validate_pubnub_config
+
+        ::Pubnub.new(
+          subscribe_key: ENV['PUBNUB_SUBSCRIBE_KEY'],
+          publish_key: ENV['PUBNUB_PUBLISH_KEY'],
+          uuid: user_id.to_s,
+          ssl: true
+        )
+      rescue
+        nil
+      end
+
+      # Get appropriate client for publishing
+      #
+      # @param user_id [String, nil] User ID to get client for, or nil for admin
+      # @return [::Pubnub, nil] Client to use for publishing
+      def client_for_publish(user_id)
+        user_id ? pubnub_client_for_user(user_id) : admin_client
+      end
+
+      # Format message data for publishing
+      #
+      # @param message [Chat::Models::Message] Message to format
+      # @return [Hash] Formatted message data
+      def prepare_message_data(message)
+        representer = Chat::REST::Representers::Message.new(message)
+        message_data = representer.to_hash
+        message_data[:event] = 'new_message'
+        message_data
+      end
+
+      # Publish message to a channel with the given client
+      #
+      # @param client [::Pubnub] Client to use for publishing
+      # @param channel [String] Channel to publish to
+      # @param message [Hash] Message to publish
+      # @return [Pubnub::Envelope] Result from publish operation
+      def publish_to_channel(client, channel, message)
+        client.publish(
+          channel: channel,
+          message: message,
+          store: false,
+          http_sync: true
+        )
+      rescue
+        nil
+      end
+
+      # Fetch presence information for a channel
+      #
+      # @param client [::Pubnub] Client to use for fetching presence
+      # @param channel [String] Channel to fetch presence for
+      # @return [Array, nil] UUIDs present in the channel or nil
+      def fetch_presence_for_channel(client, channel)
+        channel_presence = client.here_now(channel: channel).value
+        channel_presence&.result&.dig(:data, :uuids)
+      rescue
+        nil
+      end
 
       # Get cached token for user if available
       #
       # @param user_id [String] User ID to get token for
       # @return [String, nil] Cached token or nil
       def cached_token_for_user(user_id)
-        cached_token = Chat::Services::Redis.get_pubnub_token(user_id)
-        return cached_token if cached_token
-        nil
+        Chat::Services::Redis.get_pubnub_token(user_id)
+      end
+
+      # Find a user by ID
+      #
+      # @param user_id [String] User ID to find
+      # @return [Chat::Models::User, nil] User object or nil
+      def find_user(user_id)
+        user = Chat::Models::User[user_id]
+        log_message("User #{user_id} not found") unless user
+        user
       end
 
       # Validate that PubNub configuration is available
       #
       # @return [Boolean] Whether config is valid
       def validate_pubnub_config
-        ENV['PUBNUB_SUBSCRIBE_KEY'] && ENV['PUBNUB_PUBLISH_KEY'] && ENV['PUBNUB_SECRET_KEY']
+        return true if ENV['PUBNUB_SUBSCRIBE_KEY'] && ENV['PUBNUB_PUBLISH_KEY'] && ENV['PUBNUB_SECRET_KEY']
+        log_message("Missing PubNub configuration keys")
+        false
       end
 
       # Request token from PubNub API
       #
       # @param user_id [String] User ID to request token for
       # @param channels [Hash] Channel permissions
-      # @return [Pubnub::Envelope] PubNub response
+      # @return [Pubnub::Envelope, nil] PubNub response or nil
       def request_token(user_id, channels)
         admin_client.grant_token(
           ttl: DEFAULT_TTL_FOR_PUBNUB,
@@ -212,6 +243,8 @@ module Chat
           channels: channels,
           http_sync: true
         )
+      rescue
+        nil
       end
 
       # Process token result from PubNub API
@@ -220,16 +253,14 @@ module Chat
       # @param token_request [Pubnub::Envelope] PubNub response
       # @return [String, nil] Token or nil on failure
       def process_token_result(user_id, token_request)
-        result = token_request&.result
+        return nil unless token_request
 
-        if result && result[:data] && result[:data]["token"]
-          # Store token in Redis with TTL
-          token = result[:data]["token"]
-          Chat::Services::Redis.set_pubnub_token(user_id, token, DEFAULT_TTL)
-          # Also store the user-token mapping for reverse lookup
-          Chat::Services::Redis.set_user_token(user_id, token, DEFAULT_TTL)
-          token
-        elsif token_request&.error?
+        # Extract token from different possible locations in the response
+        token = extract_token_from_response(token_request)
+
+        if token
+          store_token(user_id, token)
+        elsif token_request.error?
           handle_token_error(token_request)
           nil
         else
@@ -238,19 +269,82 @@ module Chat
         end
       end
 
+      # Extract token from PubNub response object
+      #
+      # @param token_request [Pubnub::Envelope] PubNub response
+      # @return [String, nil] Token or nil if not found
+      def extract_token_from_response(token_request)
+        # Try different paths where token might be located
+        result = token_request.result
+        return nil unless result
+
+        # Path 1: In result[:data]["token"]
+        return result[:data]["token"] if result[:data] && result[:data]["token"]
+
+        # Path 2: In result[:token]
+        return result[:token] if result[:token]
+
+        # Path 3: Parse from body if JSON
+        begin
+          response_body = token_request.status[:server_response]&.http_body&.body
+          if response_body
+            parsed = JSON.parse(response_body)
+            return parsed["data"]["token"] if parsed["data"] && parsed["data"]["token"]
+          end
+        rescue
+          # Ignore JSON parsing errors
+        end
+
+        nil
+      end
+
+      # Store token in Redis with appropriate TTL
+      #
+      # @param user_id [String] User ID to store token for
+      # @param token [String] Token to store
+      # @return [String] The token
+      def store_token(user_id, token)
+        Chat::Services::Redis.set_pubnub_token(user_id, token, DEFAULT_TTL)
+        Chat::Services::Redis.set_user_token(user_id, token, DEFAULT_TTL)
+        token
+      end
+
       # Handle token error from PubNub API
       #
       # @param token_request [Pubnub::Envelope] PubNub response with error
       # @return [nil]
       def handle_token_error(token_request)
-        error_data = token_request&.status&.dig(:data)
-        error_message = error_data&.dig(:message) || "Unknown PubNub error"
-        error_details = error_data&.dig(:details)
-
+        error_message = extract_error_message(token_request)
         log_message("PubNub token generation failed: #{error_message}")
-        log_message("Error details: #{error_details.inspect}") if error_details
-
         nil
+      end
+
+      # Extract error message from PubNub response
+      #
+      # @param token_request [Pubnub::Envelope] PubNub response
+      # @return [String] Error message
+      def extract_error_message(token_request)
+        status = token_request&.status
+        return "Unknown error" unless status
+
+        # Try to get error from data hash
+        if status[:data] && status[:data][:message]
+          return status[:data][:message]
+        end
+
+        # Try to parse from response body
+        begin
+          response_body = status[:server_response]&.http_body&.body
+          if response_body
+            parsed = JSON.parse(response_body)
+            return parsed["error"]["message"] if parsed["error"] && parsed["error"]["message"]
+          end
+        rescue
+          # Ignore JSON parsing errors
+        end
+
+        # Fallback to HTTP status
+        status[:code] ? "HTTP error #{status[:code]}" : "Unknown error"
       end
 
       # Build channel permissions for PAMv3 token
@@ -258,18 +352,28 @@ module Chat
       # @param user [Chat::Models::User] User to generate permissions for
       # @return [Hash] Channels hash with permissions for PAMv3 token
       def channels_for_user(user)
-        # Get channels the user is a member of
         user_channels = Chat::Services::Channel.get_user_channels(user)
 
-        # Create array of channel IDs
-        channels = user_channels.map { |c| c.id.to_s }
+        if user_channels.empty?
+          log_message("User #{user.id} is not a member of any channels")
+          return {}
+        end
 
+        build_channel_permissions(user_channels)
+      end
+
+      # Build channel permissions from channel list
+      #
+      # @param user_channels [Array<Chat::Models::Channel>] Channels to build permissions for
+      # @return [Hash] Channel permissions hash
+      def build_channel_permissions(user_channels)
         channel_permissions = {}
 
-        # Add specific channel permissions
-        channels.each do |channel|
+        user_channels.each do |channel|
+          channel_id = channel.id.to_s
+
           # Main channel - all permissions
-          channel_permissions[channel] = ::Pubnub::Permissions.res(
+          channel_permissions[channel_id] = ::Pubnub::Permissions.res(
             read: true,
             write: true,
             delete: true,
@@ -280,7 +384,7 @@ module Chat
           )
 
           # Presence channel - read only
-          channel_permissions["#{channel}-pnpres"] = ::Pubnub::Permissions.res(
+          channel_permissions["#{channel_id}-pnpres"] = ::Pubnub::Permissions.res(
             read: true
           )
         end
@@ -288,32 +392,17 @@ module Chat
         channel_permissions
       end
 
-      # Process PubNub result, handle errors
+      # Process PubNub result
       #
       # @param result [Object] Result from PubNub operation
-      # @param error_message [String] Error message prefix to use
-      # @return [Object] Original result object
-      def handle_result(result, error_message)
-        if result.is_a?(Array)
-          result.each { |r| handle_single_result(r, error_message) }
-        else
-          handle_single_result(result, error_message)
-        end
-        result
-      end
-
-      # Process a single PubNub result
-      #
-      # @param result [Object] Result from PubNub operation
-      # @param error_message [String] Error message prefix to use
       # @return [Boolean] Success or failure
-      def handle_single_result(result, error_message)
-        if result&.error?
-          response = result.status[:server_response]
-          error_detail = response.respond_to?(:body) ? response.body : response.to_s
-          false
+      def handle_result(result)
+        return false unless result
+
+        if result.is_a?(Array)
+          !result.any? { |r| r.respond_to?(:error?) && r.error? }
         else
-          true
+          !result.respond_to?(:error?) || !result.error?
         end
       end
 
@@ -323,17 +412,6 @@ module Chat
       # @return [nil]
       def log_message(message)
         puts message
-        nil
-      end
-
-      # Log an error with backtrace
-      #
-      # @param message [String] Error message
-      # @param exception [Exception] Exception object
-      # @return [nil]
-      def log_error(message, exception)
-        puts "#{message}: #{exception.message}"
-        puts exception.backtrace.join("\n") if exception.backtrace
         nil
       end
     end
