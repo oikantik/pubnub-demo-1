@@ -2,7 +2,7 @@ FROM ruby:3.2-alpine
 
 WORKDIR /app
 
-RUN apk add --no-cache build-base postgresql-dev postgresql-client bash
+RUN apk add --no-cache build-base postgresql-dev postgresql-client bash curl jq
 
 COPY Gemfile Gemfile.lock ./
 RUN bundle install

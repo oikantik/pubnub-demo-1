@@ -71,32 +71,3 @@ To stop the application:
 ```
 docker compose down
 ```
-
-## Development
-
-### Backend API
-
-The API is built with Ruby and Grape:
-
-1. Main API code is in the `api/lib/chat` directory
-2. Key API endpoints:
-   - `GET /ping`: Simple health check
-   - `POST /messages`: Send a message to a PubNub channel
-   - `GET /messages/:channel/history`: Get message history for a channel
-
-### Frontend
-
-The frontend is built with React and TypeScript:
-
-1. The React code is in the `frontend/src` directory
-2. Key components:
-   - `PubNubProvider.tsx`: Provides PubNub context to the application
-   - `Chat.tsx`: The main chat interface component
-
-### Making Changes
-
-After making changes to the code:
-
-```
-docker compose down && docker compose build && docker compose up -d
-``` 

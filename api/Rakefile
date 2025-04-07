@@ -33,3 +33,25 @@ namespace :db do
     end
   end
 end
+
+namespace :test do
+  desc 'Test all API endpoints using the shell script'
+  task :api do
+    puts "Running API tests..."
+
+    # Make sure the script is executable
+    system("chmod +x #{File.join(BASE_PATH, 'test_api.sh')}")
+
+    # Set API host to localhost within the container
+    ENV['API_HOST'] = 'http://localhost:9292'
+
+    # Run the test script
+    result = system("#{File.join(BASE_PATH, 'test_api.sh')}")
+
+    if result
+      puts "API tests completed successfully!"
+    else
+      abort "API tests failed!"
+    end
+  end
+end
