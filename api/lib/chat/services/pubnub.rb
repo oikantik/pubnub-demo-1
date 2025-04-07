@@ -131,7 +131,7 @@ module Chat
             subscribe_key: ENV['PUBNUB_SUBSCRIBE_KEY'],
             publish_key: ENV['PUBNUB_PUBLISH_KEY'],
             secret_key: ENV['PUBNUB_SECRET_KEY'],
-            uuid: 'server-admin',
+            user_id: 'server-admin',
             ssl: true
           )
         rescue
@@ -149,7 +149,7 @@ module Chat
         ::Pubnub.new(
           subscribe_key: ENV['PUBNUB_SUBSCRIBE_KEY'],
           publish_key: ENV['PUBNUB_PUBLISH_KEY'],
-          uuid: user_id.to_s,
+          user_id: user_id.to_s,
           ssl: true
         )
       rescue
@@ -239,7 +239,7 @@ module Chat
       def request_token(user_id, channels)
         admin_client.grant_token(
           ttl: DEFAULT_TTL_FOR_PUBNUB,
-          authorized_uuid: user_id.to_s,
+          authorized_user_id: user_id.to_s,
           channels: channels,
           http_sync: true
         )
