@@ -35,6 +35,7 @@ interface ChatLayoutProps {
 export function ChatLayout({ userName, userId, onLogout }: ChatLayoutProps) {
   const navigate = useNavigate();
   const { channelId: routeChannelId } = useParams<{ channelId: string }>();
+  const { setCurrentUserName } = usePubNubContext();
 
   const [channels, setChannels] = useState<Channel[]>([]);
   const [currentChannelId, setCurrentChannelId] = useState<string | null>(null);
@@ -61,6 +62,13 @@ export function ChatLayout({ userName, userId, onLogout }: ChatLayoutProps) {
       }
     }
   }, [routeChannelId, channels]);
+
+  // Set the user's name in PubNub context
+  useEffect(() => {
+    if (userName) {
+      setCurrentUserName(userName);
+    }
+  }, [userName, setCurrentUserName]);
 
   // Fetch channels and merge them into a single list
   const fetchChannels = async () => {
@@ -161,10 +169,21 @@ export function ChatLayout({ userName, userId, onLogout }: ChatLayoutProps) {
     // Clear processed message IDs when changing channels
     processedMessageIds.current.clear();
 
-    // Set up listeners
+    // IMPORTANT: Only setup listeners for regular messages, don't override typing handlers
+    // that were set up by the PubNubProvider
     pubnubClient.setupListeners({
       onMessage: (channel, messageEvent) => {
-        console.log("PubNub message received:", channel, messageEvent);
+        // Ensure this message is for the current channel
+        if (channel !== currentChannelId) return;
+
+        // Only process regular message types, not typing indicators
+        if (
+          messageEvent &&
+          messageEvent.type &&
+          messageEvent.type !== "message"
+        ) {
+          return;
+        }
 
         // Check if we have the required fields
         if (
@@ -194,9 +213,11 @@ export function ChatLayout({ userName, userId, onLogout }: ChatLayoutProps) {
           console.warn("Received message in unexpected format:", messageEvent);
         }
       },
+      // CRITICAL: Don't override these handlers - they're handled by the PubNubProvider
+      // onTypingStart: undefined,
+      // onTypingEnd: undefined,
     });
 
-    console.log("Subscribing to channel:", currentChannelId);
     // Subscribe to the channel to receive real-time updates
     pubnubClient.subscribe([currentChannelId]);
 
@@ -204,7 +225,7 @@ export function ChatLayout({ userName, userId, onLogout }: ChatLayoutProps) {
     return () => {
       pubnubClient.unsubscribe([currentChannelId]);
     };
-  }, [currentChannelId, channels, routeChannelId]);
+  }, [currentChannelId, channels, routeChannelId, userName, userId, navigate]);
 
   // Handle channel selection
   const handleSelectChannel = (channelId: string) => {
@@ -285,12 +306,8 @@ export function ChatLayout({ userName, userId, onLogout }: ChatLayoutProps) {
     if (!currentChannelId) return;
 
     try {
-      console.log("Sending message to channel:", currentChannelId, message);
-
-      // Send the message to the server and let PubNub deliver it
-      // Don't add to local state to avoid duplicates
-      const response = await API.sendMessage(currentChannelId, message);
-      console.log("Message sent response:", response);
+      // Also send to our API for persistence
+      await API.sendMessage(currentChannelId, message);
     } catch (error) {
       console.error("Failed to send message:", error);
     }

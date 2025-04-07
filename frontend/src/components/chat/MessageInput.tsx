@@ -17,7 +17,7 @@ export function MessageInput({
 }: MessageInputProps) {
   const [message, setMessage] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const { startTyping, stopTyping } = usePubNubContext();
+  const { startTyping, stopTyping, currentUserName } = usePubNubContext();
 
   // Typing indicator logic
   const [isTyping, setIsTyping] = useState(false);
@@ -38,7 +38,8 @@ export function MessageInput({
   }, [channelId, isTyping, stopTyping]);
 
   const handleTyping = () => {
-    if (!isTyping && channelId) {
+    // Only send typing indicator if we have a channel and PubNub is initialized
+    if (!isTyping && channelId && currentUserName) {
       setIsTyping(true);
       startTyping(channelId);
     }
@@ -50,7 +51,7 @@ export function MessageInput({
 
     // Set a new timeout to stop typing
     typingTimeoutRef.current = setTimeout(() => {
-      if (channelId) {
+      if (channelId && isTyping) {
         stopTyping(channelId);
         setIsTyping(false);
       }

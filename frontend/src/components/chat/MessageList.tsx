@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useMemo } from "react";
 import { usePubNubContext } from "../providers/PubNubProvider";
 
 interface Message {
@@ -29,8 +29,17 @@ export function MessageList({
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Get typing users for current channel
-  const currentTypingUsers = channelId ? typingUsers[channelId] || [] : [];
+  // Get typing users for current channel with validation
+  const currentTypingUsers = useMemo(() => {
+    if (!channelId || !typingUsers || !typingUsers[channelId]) {
+      return [];
+    }
+
+    // Filter to ensure all objects have valid properties
+    return typingUsers[channelId].filter(
+      (user) => user && user.id && user.name
+    );
+  }, [channelId, typingUsers]);
 
   const formatTime = (timestamp: number) => {
     return new Date(timestamp * 1000).toLocaleTimeString([], {
@@ -55,6 +64,57 @@ export function MessageList({
 
     return unique;
   }, []);
+
+  // Format typing indicator text
+  const formatTypingIndicator = () => {
+    if (!currentTypingUsers || currentTypingUsers.length === 0) {
+      return "";
+    }
+
+    // Extra safety validation for malformed typing user objects
+    const validTypers = currentTypingUsers;
+
+    if (validTypers.length === 0) {
+      return "";
+    }
+
+    if (validTypers.length === 1) {
+      const typer = validTypers[0];
+      return `${typer.name} is typing...`;
+    } else if (validTypers.length === 2) {
+      return `${validTypers[0].name} and ${validTypers[1].name} are typing...`;
+    } else {
+      return `${validTypers.length} people are typing...`;
+    }
+  };
+
+  // Show typing indicators as React elements instead of just text for better control
+  const renderTypingIndicator = () => {
+    const typingText = formatTypingIndicator();
+    if (!typingText) {
+      return null;
+    }
+
+    return (
+      <div className="flex items-center text-muted-foreground text-sm mb-2">
+        <div className="flex space-x-1 mr-2">
+          <div
+            className="w-2 h-2 rounded-full bg-primary animate-bounce"
+            style={{ animationDelay: "0ms" }}
+          ></div>
+          <div
+            className="w-2 h-2 rounded-full bg-primary animate-bounce"
+            style={{ animationDelay: "300ms" }}
+          ></div>
+          <div
+            className="w-2 h-2 rounded-full bg-primary animate-bounce"
+            style={{ animationDelay: "600ms" }}
+          ></div>
+        </div>
+        <span>{typingText}</span>
+      </div>
+    );
+  };
 
   return (
     <div className="flex-1 overflow-y-auto p-4 space-y-4">
@@ -104,27 +164,7 @@ export function MessageList({
 
       {/* Typing indicator */}
       {currentTypingUsers.length > 0 && (
-        <div className="flex items-center text-muted-foreground text-sm">
-          <div className="flex space-x-1 mr-2">
-            <div
-              className="w-2 h-2 rounded-full bg-primary animate-bounce"
-              style={{ animationDelay: "0ms" }}
-            ></div>
-            <div
-              className="w-2 h-2 rounded-full bg-primary animate-bounce"
-              style={{ animationDelay: "300ms" }}
-            ></div>
-            <div
-              className="w-2 h-2 rounded-full bg-primary animate-bounce"
-              style={{ animationDelay: "600ms" }}
-            ></div>
-          </div>
-          <span>
-            {currentTypingUsers.length === 1
-              ? `${currentTypingUsers[0]} is typing...`
-              : `${currentTypingUsers.length} people are typing...`}
-          </span>
-        </div>
+        <div className="mt-2 mb-1">{renderTypingIndicator()}</div>
       )}
 
       {/* Invisible element for scrolling to bottom */}
