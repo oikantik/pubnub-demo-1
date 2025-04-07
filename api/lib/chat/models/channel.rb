@@ -2,6 +2,8 @@
 
 module Chat
   module Models
+    # Channel model representing a chat room or conversation space
+    # Stores channel information and relationships to users and messages
     class Channel < Sequel::Model
       plugin :timestamps, update_on_create: true
 

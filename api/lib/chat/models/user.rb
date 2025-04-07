@@ -2,6 +2,8 @@
 
 module Chat
   module Models
+    # User model representing a chat participant
+    # Stores user identity and relationships to channels and messages
     class User < Sequel::Model
       plugin :timestamps, update_on_create: true
 
