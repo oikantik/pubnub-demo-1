@@ -22,25 +22,32 @@ module Chat
       # @param force_refresh [Boolean] Whether to force refresh the token
       # @return [String, nil] Valid token or nil
       def token_for_user(user_id, force_refresh = false)
-        return cached_token_for_user(user_id) unless force_refresh
-        generate_token(user_id)
+        generate_token(user_id, force_refresh)
       end
 
-      # Publish a message to a channel
+      # Publish a message to a channel using a client dynamically configured with the sender's PAM token.
       #
       # @param channel [String] Channel to publish to
       # @param message [Hash] Message to publish
-      # @param user_id [String, nil] User ID to associate with the publish (for auth token)
+      # @param user_id [String] The originating user ID (required to fetch token and create client)
       # @return [Boolean] Success or failure
-      def publish(channel:, message:, user_id: nil)
-        client = client_for_publish(user_id)
-        return false unless client
+      def publish(channel:, message:, user_id:)
+        result = with_user_token_client(user_id) do |client|
+          # Ensure sender_id is in the payload
+          message[:sender_id] ||= user_id
+          publish_to_channel(client, channel, message)
+        end
 
-        result = publish_to_channel(client, channel, message)
+        # If with_user_token_client returned nil (e.g., token not found),
+        # result will be nil. handle_result expects a Pubnub::Envelope or nil.
+        # We need to decide if failure to get token/client counts as a failed publish.
+        # Assuming yes for now.
+        return false if result.nil?
+
         handle_result(result)
       end
 
-      # Publish a message to its channel
+      # Publish a message model to its channel
       #
       # @param message [Chat::Models::Message] Message object to publish
       # @return [Boolean] Success or failure
@@ -49,23 +56,24 @@ module Chat
         publish(
           channel: message.channel_id.to_s,
           message: message_data,
-          user_id: message.sender_id
+          user_id: message.sender_id.to_s
         )
       end
 
-      # Get presence information for a channel
+      # Get presence information for a channel using a client dynamically configured
+      # with the requesting user's PAM token.
       #
       # @param channel [String] The channel to check presence for
-      # @param auth_token [String] Authentication token for the request
+      # @param auth_token [String] Authentication token of the *requesting* user (app specific, to find their PAM token)
       # @return [Array, nil] Array of UUIDs present in the channel or nil on error
       def presence_on_channel(channel, auth_token:)
-        user_id = Chat::Services::Redis.get_user_from_token(auth_token)
-        return nil unless user_id
+        # Verify the requesting user is authenticated and get their ID
+        requesting_user_id = Chat::Services::Redis.get_user_from_token(auth_token)
+        return nil unless requesting_user_id
 
-        client = pubnub_client_for_user(user_id)
-        return nil unless client
-
-        fetch_presence_for_channel(client, channel)
+        with_user_token_client(requesting_user_id) do |client|
+          fetch_presence_for_channel(client, channel)
+        end
       end
 
       # Grant access to a specific channel for a user
@@ -112,39 +120,75 @@ module Chat
         channels_with_permissions = channels_for_user(user)
         return nil if channels_with_permissions.empty?
 
-        return nil unless admin_client
+        # Ensure the access management client is available
+        return nil unless pubnub_client_for_access_management
 
+        # Use the access management client to request the token
         token_request = request_token(user_id, channels_with_permissions)
         process_token_result(user_id, token_request)
-      rescue
+      rescue => e
+        log_message("Error generating token for user #{user_id}: #{e.message}\n#{e.backtrace.join("\n")}")
         nil
       end
 
       private
 
-      # @return [::Pubnub] PubNub admin client with full permissions
-      def admin_client
-        @admin_client ||= begin
-          return nil unless validate_pubnub_config
+      # Executes a block with a PubNub client configured for a specific user's PAM token.
+      # Handles fetching the token, setting it on the client, and clearing it afterwards.
+      #
+      # @param user_id [String] The user ID.
+      # @yield [client] Gives the configured PubNub client instance to the block.
+      # @return The result of the block, or nil if token/client setup fails.
+      def with_user_token_client(user_id)
+        user_pam_token = cached_token_for_user(user_id)
+        unless user_pam_token
+          log_message("Action failed: No PubNub PAM token found for user #{user_id}")
+          return nil
+        end
+
+        client = pubnub_client_for_user(user_id)
+        return nil unless client
+
+        begin
+          client.set_token(user_pam_token)
+          yield client # Execute the provided block with the configured client
+        rescue => e
+          log_message("Error during PubNub operation for user #{user_id}: #{e.message}")
+          nil # Return nil on error within the block
+        ensure
+          # Ensure token is always cleared from the client instance
+          client&.set_token(nil)
+        end
+      end
+
+      # Renamed and memoized
+      # @return [::Pubnub] PubNub client initialized with Secret Key for access management operations.
+      def pubnub_client_for_access_management
+        @pubnub_client_for_access_management ||= begin
+          # Requires Secret Key
+          return nil unless validate_pubnub_config(require_secret: true)
 
           ::Pubnub.new(
             subscribe_key: ENV['PUBNUB_SUBSCRIBE_KEY'],
             publish_key: ENV['PUBNUB_PUBLISH_KEY'],
             secret_key: ENV['PUBNUB_SECRET_KEY'],
-            user_id: 'server-admin',
+            user_id: 'server-access-manager', # Distinct user ID for this client
             ssl: true
           )
-        rescue
+        rescue => e
+          log_message("Error initializing pubnub_client_for_access_management: #{e.message}")
           nil
         end
       end
 
-      # Get PubNub client for a specific user's auth token
+      # Get PubNub client initialized for a specific user ID (Pub/Sub keys only).
+      # The PAM token must be set dynamically using `client.auth_token = token` before use.
       #
       # @param user_id [String] The user ID to get client for
-      # @return [::Pubnub, nil] PubNub client configured with user's token
+      # @return [::Pubnub, nil] PubNub client configured with user's ID
       def pubnub_client_for_user(user_id)
-        return nil unless validate_pubnub_config
+        # Use require_secret: false as this client doesn't need the secret key
+        return nil unless validate_pubnub_config(require_secret: false)
 
         ::Pubnub.new(
           subscribe_key: ENV['PUBNUB_SUBSCRIBE_KEY'],
@@ -152,19 +196,13 @@ module Chat
           user_id: user_id.to_s,
           ssl: true
         )
-      rescue
+      rescue => e
+        log_message("Error initializing pubnub_client_for_user for #{user_id}: #{e.message}")
         nil
       end
 
-      # Get appropriate client for publishing
-      #
-      # @param user_id [String, nil] User ID to get client for, or nil for admin
-      # @return [::Pubnub, nil] Client to use for publishing
-      def client_for_publish(user_id)
-        user_id ? pubnub_client_for_user(user_id) : admin_client
-      end
-
       # Format message data for publishing
+      # Ensures sender information is included.
       #
       # @param message [Chat::Models::Message] Message to format
       # @return [Hash] Formatted message data
@@ -225,10 +263,22 @@ module Chat
       # Validate that PubNub configuration is available
       #
       # @return [Boolean] Whether config is valid
-      def validate_pubnub_config
-        return true if ENV['PUBNUB_SUBSCRIBE_KEY'] && ENV['PUBNUB_PUBLISH_KEY'] && ENV['PUBNUB_SECRET_KEY']
-        log_message("Missing PubNub configuration keys")
-        false
+      def validate_pubnub_config(require_secret: true)
+        keys_present = ENV['PUBNUB_SUBSCRIBE_KEY'] && ENV['PUBNUB_PUBLISH_KEY']
+
+        if require_secret
+          secret_present = ENV['PUBNUB_SECRET_KEY']
+          unless keys_present && secret_present
+            log_message("Missing required PubNub configuration keys (Sub, Pub, Secret)")
+            return false
+          end
+        else
+          unless keys_present
+            log_message("Missing required PubNub configuration keys (Sub, Pub)")
+            return false
+          end
+        end
+        true
       end
 
       # Request token from PubNub API
@@ -237,7 +287,11 @@ module Chat
       # @param channels [Hash] Channel permissions
       # @return [Pubnub::Envelope, nil] PubNub response or nil
       def request_token(user_id, channels)
-        admin_client.grant_token(
+        # Use the access management client to grant the token
+        client = pubnub_client_for_access_management
+        return nil unless client
+
+        client.grant_token(
           ttl: DEFAULT_TTL_FOR_PUBNUB,
           authorized_user_id: user_id.to_s,
           channels: channels,
