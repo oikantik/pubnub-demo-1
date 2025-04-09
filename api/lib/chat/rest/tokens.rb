@@ -16,7 +16,7 @@ module Chat::REST
 
       desc 'Generate a PubNub access token'
       post :pubnub do
-        # Generate token (force refresh to ensure we get a new valid token)
+        # Generate token
         token = Chat::Services::Pubnub.instance.generate_token(current_user.id)
 
         unless token

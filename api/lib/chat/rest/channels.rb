@@ -97,7 +97,7 @@ module Chat::REST
         is_member = Chat::Services::Channel.is_member?(channel, current_user)
         error!('You are not a member of this channel', 403) unless is_member
 
-        present_with(channel, Chat::REST::Representers::Channel, include_members: true)
+        present_with(channel, Chat::REST::Representers::Channel)
       end
 
       desc 'List all channels for the current user'
@@ -141,22 +141,15 @@ module Chat::REST
             limit: params[:limit]
           )
 
-          # Format the messages for the frontend format
-          formatted_messages = messages.map do |msg|
-            {
-              message: msg.text,
-              sender: msg.sender.name,
-              sender_id: msg.sender.id.to_s,
-              timestamp: msg.created_at.to_i,
-              channel: channel.name,
-              channel_id: channel.id.to_s,
-              id: msg.id.to_s
-            }
-          end
+          # Use the Message representer to format the collection
+          present_collection_with(messages, Chat::REST::Representers::Message)
 
-          formatted_messages
+        rescue Sequel::InvalidValue => e
+          # Handle specific error for invalid UUID format
+          error!("Invalid channel ID format: #{params[:id]}", 400)
         rescue => e
-          error!("Failed to fetch channel history: #{e.message}", 500)
+          log_message("Failed to fetch channel history for #{params[:id]}: #{e.message}")
+          error!("Failed to fetch channel history", 500)
         end
       end
 
