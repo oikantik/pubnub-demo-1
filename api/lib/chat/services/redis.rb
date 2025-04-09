@@ -59,52 +59,40 @@ module Chat
         client.expire(key, ttl)
       end
 
-      # Cache a user authentication token
+      # Cache the mapping from an app auth token to a user ID.
       #
       # @param user_id [String] The user ID
-      # @param token [String] The authentication token
+      # @param token [String] The application authentication token
       # @param ttl [Integer] Time-to-live in seconds (default: 24 hours)
       # @return [String] "OK" if successful
-      def self.cache_user_auth_token(user_id, token, ttl = 86400)
+      def self.cache_auth_token_lookup(user_id, token, ttl = 86400)
+        # Store token -> user_id mapping for authentication
         set("auth:#{token}", user_id, ttl)
       end
 
-      # Get a user ID from an authentication token
+      # Get a user ID from an application authentication token
       #
-      # @param token [String] The authentication token
+      # @param token [String] The application authentication token
       # @return [String, nil] The user ID or nil if not found
       def self.get_user_from_token(token)
         get("auth:#{token}")
       end
 
-      # Set a user's authentication token with mappings for both directions
+      # Set a user's PubNub PAM token
       #
       # @param user_id [String] The user ID
-      # @param token [String] The authentication token
-      # @param ttl [Integer] Time-to-live in seconds (default: 24 hours)
+      # @param token [String] The PubNub PAM token
+      # @param ttl [Integer] Time-to-live in seconds
       # @return [String] "OK" if successful
-      def self.set_user_token(user_id, token, ttl = 86400)
-        # Store token -> user_id mapping for authentication
-        set("auth:#{token}", user_id, ttl)
-        # Store user_id -> token mapping for pubnub access
-        set_pubnub_token(user_id, token, ttl)
-      end
-
-      # Set a user's PubNub token
-      #
-      # @param user_id [String] The user ID
-      # @param token [String] The PubNub token
-      # @param ttl [Integer] Time-to-live in seconds (default: 24 hours)
-      # @return [String] "OK" if successful
-      def self.set_pubnub_token(user_id, token, ttl = 86400)
-        # Store user_id -> token mapping for PubNub access
+      def self.set_pubnub_token(user_id, token, ttl = Chat::Services::Pubnub::DEFAULT_TTL_SECONDS)
+        # Store user_id -> PubNub PAM token mapping
         set("pubnub:#{user_id}", token, ttl)
       end
 
-      # Get a user's PubNub token
+      # Get a user's PubNub PAM token
       #
       # @param user_id [String] The user ID
-      # @return [String, nil] The PubNub token or nil if not found
+      # @return [String, nil] The PubNub PAM token or nil if not found
       def self.get_pubnub_token(user_id)
         get("pubnub:#{user_id}")
       end

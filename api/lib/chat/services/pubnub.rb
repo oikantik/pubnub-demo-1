@@ -87,19 +87,6 @@ module Chat
         !token.nil?
       end
 
-      # Revoke a token
-      #
-      # @param token [String] The token to revoke
-      # @return [Boolean] Success or failure
-      def revoke_token(token)
-        user_id = Chat::Services::Redis.get_user_from_token(token)
-        return false unless user_id
-
-        Chat::Services::Redis.delete("auth:#{token}")
-        Chat::Services::Redis.delete("pubnub:#{user_id}")
-        true
-      end
-
       # Generate a PubNub access token with permissions for a user
       # Uses PubNub Access Manager v3 (PAMv3) for token generation
       # Tokens are cached in Redis with the appropriate TTL
@@ -356,11 +343,10 @@ module Chat
       #
       # @param user_id [String] User ID to store token for
       # @param token [String] Token to store
-      # @return [String] The token
+      # @return [void]
       def store_token(user_id, token)
         Chat::Services::Redis.set_pubnub_token(user_id, token, DEFAULT_TTL)
-        Chat::Services::Redis.set_user_token(user_id, token, DEFAULT_TTL)
-        token
+        return
       end
 
       # Handle token error from PubNub API
