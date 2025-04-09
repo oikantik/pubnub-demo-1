@@ -301,6 +301,7 @@ module Chat
 
         if token
           store_token(user_id, token)
+          token
         elsif token_request.error?
           handle_token_error(token_request)
           nil

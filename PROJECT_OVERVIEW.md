@@ -65,28 +65,70 @@ This document provides a summary of the PubNub Demo project architecture, backen
 
 *   Located in the `frontend/` directory.
 *   Built with React, TypeScript, and Vite.
-*   Uses Tailwind CSS for styling.
-*   Handles routing with React Router.
+*   Uses Tailwind CSS for styling (`index.css`, `tailwind.config.js`), assisted by `clsx` and `tailwind-merge` via `lib/utils.ts` (`cn` function).
+*   Handles routing with `react-router-dom`.
 
 ### Key Components & Logic
 
-*   **`src/App.tsx`:** Main application component. Manages auth state (via `localStorage`), routing, and top-level layout.
-*   **`src/lib/api.ts`:** Axios-based client for interacting with the backend API. Includes an interceptor to automatically add the `Authorization: Bearer <token>` header.
-*   **`src/components/auth/LoginForm.tsx`:** Handles user login UI and API call.
-*   **`src/components/chat/ChatLayout.tsx`:** Main chat interface, likely containing channel list, message display, message input, etc.
-*   **`src/components/providers/PubNubProvider.tsx`:** Manages the PubNub SDK instance, connection, and subscriptions, using the token fetched from the API.
+*   **`src/main.tsx`**: Standard React entry point, renders `<App />`.
+*   **`src/App.tsx`**: Top-level component.
+    *   Manages core app state: `userId`, `authToken` (app token), `userName`, `initialized` status.
+    *   Handles routing logic (`BrowserRouter`, `Routes`, `Route`).
+    *   Persists/restores `userId` and `authToken` using `localStorage`.
+    *   Conditionally renders `LoginForm` or `ChatLayout` based on auth state.
+    *   Fetches user info (`API.getUserInfo`) on load/login.
+    *   Wraps routes in `PubNubProvider`.
+*   **`src/lib/api.ts`**: Defines static `API` class using `axios`.
+    *   Configures `baseURL` via `VITE_API_URL` (default: `http://localhost:9292`).
+    *   Includes an interceptor to automatically add `Authorization: Bearer <app_auth_token>` header from `localStorage`.
+    *   Provides methods mapping to backend API endpoints (login, logout, channels, messages, getPubnubToken).
+*   **`src/lib/pubnub-client.ts`**: Singleton wrapper around PubNub JS SDK.
+    *   Handles initialization (`initialize`), fetching the PubNub PAM token (`API.getPubnubToken`), and applying it (`setToken`).
+    *   Manages subscriptions (`subscribe`, `unsubscribe`), listener setup (`setupListeners`), and cleanup.
+    *   Provides methods for sending typing indicators (`sendTypingStart`, `sendTypingEnd`) via PubNub signals.
+    *   Parses incoming messages to differentiate between regular messages and typing signals.
+*   **`src/components/providers/PubNubProvider.tsx`**: React Context provider for PubNub.
+    *   Uses `pubnub-client.ts` singleton.
+    *   Initializes PubNub when `userId` is available.
+    *   Manages state for PubNub connection status, typing users (`typingUsers`), and presence counts (`presence`).
+    *   Sets up listeners via `pubnubClient.setupListeners`, updating its state based on events.
+    *   Provides `usePubNub` hook for components to access state and interaction methods (`startTyping`, `stopTyping`, `subscribeTo`, etc.).
+*   **`src/components/auth/LoginForm.tsx`**: Renders login form, calls `API.login`, and invokes `onLogin` prop (from `App.tsx`) on success.
+*   **`src/components/ui/`**: Basic UI components (Button, Card, Input, Textarea) using Tailwind CSS, likely from shadcn/ui.
+*   **`src/components/chat/ChatLayout.tsx`**: Main authenticated UI.
+    *   Orchestrates channel and message components.
+    *   Fetches channel list (`API.getAllChannels`) and message history (`API.getChannelMessages`).
+    *   Manages `currentChannelId` state based on route params (`useParams`) or selection.
+    *   Handles channel selection, joining (`API.joinChannel`), creation (`API.createChannel`), and message sending (`API.sendMessage`).
+    *   Sets up PubNub listeners for *incoming messages* on the current channel via `pubnubClient.setupListeners`.
+    *   Subscribes/unsubscribes to channels via `pubnubClient` as the current channel changes.
+    *   Renders sidebar (with `ChannelList`, `CreateChannel`) and main content area (with `MessageList`, `MessageInput`).
+*   **`src/components/chat/ChannelList.tsx`**: Displays joined and other channels, using presence data from `usePubNubContext`. Handles selection/joining via props.
+*   **`src/components/chat/CreateChannel.tsx`**: Form for creating a new channel, calls `onCreateChannel` prop.
+*   **`src/components/chat/MessageList.tsx`**: Displays messages for the current channel. Renders typing indicators based on `typingUsers` from `usePubNubContext`. Handles auto-scrolling.
+*   **`src/components/chat/MessageInput.tsx`**: Textarea for inputting messages. Handles sending typing indicators (`startTyping`/`stopTyping` from context) and calls `onSendMessage` prop on submit.
 
-### Frontend Flow
+### Frontend Flow (Detailed)
 
-1.  **Load:** Check `localStorage` for token.
-2.  **No Token:** Show `LoginForm`.
-3.  **Login:** User submits name -> `POST /v1/users/login` -> Get token & user info -> Save to `localStorage`.
-4.  **Authenticated:** Show `ChatLayout`.
-5.  **Chat Init:** Fetch channels (`GET /v1/channels`), fetch PubNub token (`POST /v1/tokens/pubnub`), initialize PubNub.
-6.  **Channel Select:** Fetch history (`GET /v1/channels/:id/history`), fetch presence (`GET /v1/channels/:id/presence`), subscribe to PubNub channel.
-7.  **Send Message:** `POST /v1/messages` -> API saves & broadcasts via PubNub.
-8.  **Receive Message:** Frontend gets message via PubNub subscription.
-9.  **Logout:** `DELETE /v1/users/logout` -> Clear `localStorage` -> Show `LoginForm`.
+1.  **Load:** `App.tsx` checks `localStorage` for `authToken`.
+2.  **No Token:** `LoginForm` shown. User enters name -> `API.login` -> `App.tsx` receives `userId`, `authToken`, `name` -> Saves to `localStorage`.
+3.  **Auth State Change:** `App.tsx` renders `PubNubProvider` and `ChatLayout`.
+4.  **PubNub Init:** `PubNubProvider` detects `userId` -> calls `pubnubClient.initialize(userId)`.
+5.  **Token Fetch:** `pubnubClient.initialize` calls `API.getPubnubToken()` -> Backend returns PubNub PAM token.
+6.  **SDK Setup:** `pubnubClient` initializes PubNub SDK, applies token (`setToken`), sets up *global* listeners (for typing/presence via `PubNubProvider` callbacks).
+7.  **Chat Layout Mount:** `ChatLayout` mounts -> calls `fetchChannels()` -> `API.getAllChannels` -> populates `channels` state. Selects initial channel (route param or first joined).
+8.  **Channel Change/Select:** `useEffect` in `ChatLayout` runs:
+    *   Unsubscribes from old channel (`pubnubClient.unsubscribe`).
+    *   Removes old message listener.
+    *   Fetches history: `API.getChannelMessages(newChannelId)` -> Updates `messages` state.
+    *   Subscribes to new channel: `pubnubClient.subscribe([newChannelId])`.
+    *   Sets up new listener: `pubnubClient.setupListeners({ onMessage: ... })` for incoming messages on this specific channel.
+    *   Updates URL via `navigate`.
+9.  **Typing:** User types in `MessageInput` -> `handleTyping` -> `usePubNubContext().startTyping` -> `pubnubClient.sendTypingStart` -> Publishes typing signal.
+10. **Send Message:** User submits `MessageInput` -> `handleSendMessage` -> `API.sendMessage` -> Backend saves message & likely broadcasts via PubNub.
+11. **Receive Message:** PubNub message arrives -> `onMessage` listener in `ChatLayout` -> Updates `messages` state -> `MessageList` re-renders.
+12. **Receive Typing/Presence:** PubNub signal/event arrives -> Global listeners in `PubNubProvider` handle it -> Updates `typingUsers`/`presence` state -> `MessageList`/`ChannelList` re-render via context.
+13. **Logout:** Logout button -> `onLogout` prop -> `App.tsx` clears state/`localStorage` -> `LoginForm` rendered.
 
 ---
 

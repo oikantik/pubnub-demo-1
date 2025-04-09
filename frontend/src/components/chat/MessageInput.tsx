@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, useCallback } from "react";
 import { Textarea } from "../ui/textarea";
 import { Button } from "../ui/button";
 import { Send } from "lucide-react";
@@ -20,43 +20,46 @@ export function MessageInput({
   const { startTyping, stopTyping, currentUserName } = usePubNubContext();
 
   // Typing indicator logic
-  const [isTyping, setIsTyping] = useState(false);
+  const isTypingRef = useRef(false); // Use ref to avoid dependency issues in callbacks
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(() => {
-    return () => {
-      // Clean up typing timeout
+  // Centralized function to signal stop typing
+  const signalStopTyping = useCallback(() => {
+    if (isTypingRef.current && channelId) {
+      stopTyping(channelId);
+      isTypingRef.current = false; // Update ref immediately
       if (typingTimeoutRef.current) {
         clearTimeout(typingTimeoutRef.current);
+        typingTimeoutRef.current = null;
       }
-
-      // Signal typing stop on unmount if needed
-      if (isTyping && channelId) {
-        stopTyping(channelId);
-      }
-    };
-  }, [channelId, isTyping, stopTyping]);
-
-  const handleTyping = () => {
-    // Only send typing indicator if we have a channel and PubNub is initialized
-    if (!isTyping && channelId && currentUserName) {
-      setIsTyping(true);
-      startTyping(channelId);
     }
+  }, [channelId, stopTyping]);
 
-    // Clear existing timeout
+  useEffect(() => {
+    // Cleanup on unmount or channel change
+    return () => {
+      signalStopTyping();
+    };
+  }, [channelId, signalStopTyping]); // Depend on channelId and the stable callback
+
+  const handleTyping = useCallback(() => {
+    // Clear existing timeout before potentially starting
     if (typingTimeoutRef.current) {
       clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = null;
+    }
+
+    // Signal start typing if not already typing
+    if (!isTypingRef.current && channelId && currentUserName) {
+      isTypingRef.current = true;
+      startTyping(channelId);
     }
 
     // Set a new timeout to stop typing
     typingTimeoutRef.current = setTimeout(() => {
-      if (channelId && isTyping) {
-        stopTyping(channelId);
-        setIsTyping(false);
-      }
+      signalStopTyping();
     }, 3000); // Stop typing signal after 3 seconds of inactivity
-  };
+  }, [channelId, currentUserName, startTyping, signalStopTyping]);
 
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setMessage(e.target.value);
@@ -70,11 +73,8 @@ export function MessageInput({
       onSendMessage(message.trim());
       setMessage("");
 
-      // Stop typing indicator when message is sent
-      if (isTyping && channelId) {
-        stopTyping(channelId);
-        setIsTyping(false);
-      }
+      // Stop typing indicator immediately when message is sent
+      signalStopTyping();
 
       // Focus back on textarea after sending
       textareaRef.current?.focus();

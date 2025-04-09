@@ -1,11 +1,6 @@
 import { Button } from "../ui/button";
 import { usePubNubContext } from "../providers/PubNubProvider";
-
-interface Channel {
-  id: string;
-  name: string;
-  joined?: boolean;
-}
+import { Channel } from "../../types";
 
 interface MyChannelsListProps {
   channels: Channel[];
@@ -35,7 +30,15 @@ export function MyChannelsList({
     <div className="space-y-1 p-2">
       {myChannels.map((channel) => {
         const isActive = channel.id === currentChannelId;
-        const occupancy = presence[channel.id] || 0;
+        const occupancy = presence[channel.id];
+        const membersArray = channel.members;
+
+        const countDisplay =
+          occupancy !== undefined && occupancy >= 0
+            ? `${occupancy} online`
+            : Array.isArray(membersArray)
+            ? `${membersArray.length} members`
+            : "-";
 
         return (
           <div
@@ -50,7 +53,7 @@ export function MyChannelsList({
                 {channel.name}
               </div>
               <div className="text-xs text-muted-foreground">
-                {occupancy} {occupancy === 1 ? "member" : "members"}
+                {countDisplay}
               </div>
             </div>
           </div>
@@ -85,7 +88,15 @@ export function OtherChannelsList({
   return (
     <div className="space-y-1 p-2">
       {otherChannels.map((channel) => {
-        const occupancy = presence[channel.id] || 0;
+        const occupancy = presence[channel.id];
+        const membersArray = channel.members;
+
+        const countDisplay =
+          occupancy !== undefined && occupancy >= 0
+            ? `${occupancy} online`
+            : Array.isArray(membersArray)
+            ? `${membersArray.length} members`
+            : "-";
 
         return (
           <div
@@ -97,7 +108,7 @@ export function OtherChannelsList({
                 {channel.name}
               </div>
               <div className="text-xs text-muted-foreground">
-                {occupancy} {occupancy === 1 ? "member" : "members"}
+                {countDisplay}
               </div>
             </div>
             <Button

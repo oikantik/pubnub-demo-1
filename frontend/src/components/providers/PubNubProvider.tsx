@@ -7,41 +7,44 @@ import React, {
   useRef,
 } from "react";
 import { PubNubProvider as Provider } from "pubnub-react";
-import PubNub, { PresenceEvent, StatusEvent } from "pubnub";
-import pubnubClient from "../../lib/pubnub-client";
-
-// Define the typing user info with name
-interface TypingUser {
-  id: string;
-  name: string;
-}
+import PubNub, { MessageEvent } from "pubnub";
+import pubnubService from "../../lib/pubnub.service";
+import { TypingUser, Message } from "../../types";
 
 // Define the PubNub context interface
 interface PubNubContextType {
+  client: PubNub | null;
   isInitialized: boolean;
   isConnected: boolean;
   typingUsers: Record<string, TypingUser[]>;
   startTyping: (channel: string) => void;
   stopTyping: (channel: string) => void;
   presence: Record<string, number>;
-  subscribeTo: (channel: string) => void;
-  unsubscribeFrom: (channel: string) => void;
+  subscribe: (channels: string[]) => void;
+  unsubscribe: (channels: string[]) => void;
   currentUserName: string | null;
   setCurrentUserName: (name: string) => void;
+  userId: string | null;
+  messagesByChannel: Record<string, Message[]>;
+  getMessagesForChannel: (channelId: string) => Message[];
 }
 
 // Create context with default values
 const PubNubContext = createContext<PubNubContextType>({
+  client: null,
   isInitialized: false,
   isConnected: false,
   typingUsers: {},
   startTyping: () => {},
   stopTyping: () => {},
   presence: {},
-  subscribeTo: () => {},
-  unsubscribeFrom: () => {},
+  subscribe: () => {},
+  unsubscribe: () => {},
   currentUserName: null,
   setCurrentUserName: () => {},
+  userId: null,
+  messagesByChannel: {},
+  getMessagesForChannel: () => [],
 });
 
 /**
@@ -60,257 +63,238 @@ export const usePubNubContext = usePubNub; // Keep existing export for backward 
 interface PubNubProviderProps {
   children: React.ReactNode;
   userId?: string;
-  userName?: string;
 }
 
 export const PubNubProvider: React.FC<PubNubProviderProps> = ({
   children,
   userId,
-  userName,
 }) => {
-  const [client, setClient] = useState<PubNub | null>(null);
-  const [isInitialized, setIsInitialized] = useState(false);
+  const [clientInstance, setClientInstance] = useState<PubNub | null>(
+    pubnubService.client
+  );
+  const [isInitialized, setIsInitialized] = useState(pubnubService.initialized);
   const [isConnected, setIsConnected] = useState(false);
   const [typingUsers, setTypingUsers] = useState<Record<string, TypingUser[]>>(
     {}
   );
   const [presence, setPresence] = useState<Record<string, number>>({});
-  const [currentUserName, setCurrentUserName] = useState<string | null>(
-    userName || null
+  const [currentUserName, setCurrentUserNameState] = useState<string | null>(
+    null
   );
+  const [messagesByChannel, setMessagesByChannel] = useState<
+    Record<string, Message[]>
+  >({});
+  const receivedMessageIds = useRef(new Set<string>());
 
-  // Use ref to track initialization state to prevent multiple initializations
-  const isInitializing = useRef(false);
+  const initializedUserId = useRef<string | null>(null);
 
-  // Update user name in client when it changes
   useEffect(() => {
-    if (currentUserName && isInitialized) {
-      pubnubClient.setUserName(currentUserName);
-    }
-  }, [currentUserName, isInitialized]);
+    if (userId && userId !== initializedUserId.current) {
+      console.log("PubNubProvider: Initializing service for", userId);
+      initializedUserId.current = userId;
+      setMessagesByChannel({});
+      receivedMessageIds.current.clear();
 
-  // Initialize the PubNub client when userId changes
-  useEffect(() => {
-    // Don't do anything if no userId is provided
-    if (!userId) {
-      setIsInitialized(false);
-      setClient(null);
-      return;
-    }
+      const init = async () => {
+        const instance = await pubnubService.initialize(userId);
+        setClientInstance(instance);
+        setIsInitialized(pubnubService.initialized);
 
-    // Prevent multiple initializations
-    if (isInitializing.current) return;
-    isInitializing.current = true;
+        if (instance) {
+          pubnubService.setupListeners({
+            onMessage: (channel, event: MessageEvent) => {
+              const messageData = event.message;
 
-    const initPubNub = async () => {
-      try {
-        // Initialize with userId and userName if available
-        const pubnub = await pubnubClient.initialize(
-          userId,
-          currentUserName || undefined
-        );
-        setClient(pubnub);
-        setIsInitialized(true);
+              if (
+                messageData &&
+                messageData.message &&
+                typeof messageData.sender === "string" &&
+                messageData.sender_id &&
+                messageData.timestamp
+              ) {
+                const messageId =
+                  messageData.id ||
+                  `${messageData.sender_id}-${messageData.timestamp}`;
 
-        // Define explicit handler functions for better debugging
-        const messageHandler = (channel: string, message: any) => {
-          console.log("PubNub message received:", channel, message);
-        };
+                if (receivedMessageIds.current.has(messageId)) {
+                  return;
+                }
+                receivedMessageIds.current.add(messageId);
 
-        const typingStartHandler = (
-          channel: string,
-          sender: string,
-          senderName?: string
-        ) => {
-          if (!channel || sender === userId) {
-            return;
-          }
+                const newMessage: Message = {
+                  id: messageId,
+                  sender: {
+                    id: messageData.sender_id,
+                    name: messageData.sender,
+                  },
+                  message: messageData.message,
+                  timestamp: messageData.timestamp,
+                  channel_id: channel,
+                };
 
-          setTypingUsers((prev) => {
-            // Copy the current typing users for this channel
-            const channelTypers = [...(prev[channel] || [])];
+                setMessagesByChannel((prev) => {
+                  const existingMessages = prev[channel] || [];
+                  if (
+                    existingMessages.some((msg) => msg.id === newMessage.id)
+                  ) {
+                    return prev;
+                  }
+                  return {
+                    ...prev,
+                    [channel]: [...existingMessages, newMessage],
+                  };
+                });
+              } else {
+                console.warn(
+                  "PubNubProvider - Received message in unexpected format or missing fields:",
+                  event
+                );
+              }
+            },
+            onTypingStart: (channel, user) => {
+              console.log(
+                `PubNubProvider: onTypingStart - Channel: ${channel}, User:`,
+                user
+              );
+              setTypingUsers((prev) => {
+                const channelTypers = prev[channel] || [];
+                if (!channelTypers.some((u) => u.id === user.id)) {
+                  console.log(
+                    `PubNubProvider: Adding typer ${user.name} to ${channel}`
+                  );
+                  return { ...prev, [channel]: [...channelTypers, user] };
+                }
+                console.log(
+                  `PubNubProvider: Typer ${user.name} already present in ${channel}`
+                );
+                return prev;
+              });
+            },
+            onTypingEnd: (channel, userId) => {
+              console.log(
+                `PubNubProvider: onTypingEnd - Channel: ${channel}, UserID: ${userId}`
+              );
+              setTypingUsers((prev) => {
+                const channelTypers = prev[channel] || [];
+                const userExists = channelTypers.some((u) => u.id === userId);
+                if (!userExists) {
+                  console.log(
+                    `PubNubProvider: User ${userId} not found in typing list for ${channel}, skipping removal.`
+                  );
+                  return prev; // User already removed or never added
+                }
+                const updatedTypers = channelTypers.filter(
+                  (u) => u.id !== userId
+                );
+                console.log(
+                  `PubNubProvider: Removing typer ${userId} from ${channel}. New count: ${updatedTypers.length}`
+                );
+                const newState = { ...prev };
+                if (updatedTypers.length > 0) {
+                  newState[channel] = updatedTypers;
+                } else {
+                  delete newState[channel]; // Remove channel entry if no typers left
+                  console.log(
+                    `PubNubProvider: No typers left in ${channel}, removing channel key.`
+                  );
+                }
+                return newState;
+              });
+            },
+            onPresence: (event) => {
+              console.log("PubNubProvider - Received Presence Event:", event);
 
-            // Check if this user is already in the typing list
-            const existingIndex = channelTypers.findIndex(
-              (user) => user.id === sender
-            );
-
-            // If user is already in the list, don't update
-            if (existingIndex >= 0) {
-              return prev;
-            }
-
-            // Add the new typing user
-            const newTypers = [
-              ...channelTypers,
-              { id: sender, name: senderName || sender },
-            ];
-
-            // Return a completely new object to ensure React detects the change
-            return {
-              ...prev,
-              [channel]: newTypers,
-            };
+              if (event.channel && typeof event.occupancy === "number") {
+                setPresence((prev) => ({
+                  ...prev,
+                  [event.channel]: event.occupancy,
+                }));
+              } else {
+                console.warn(
+                  "PubNubProvider - Presence event missing channel or occupancy:",
+                  event
+                );
+              }
+            },
+            onStatus: (statusEvent) => {
+              setIsConnected(statusEvent.category === "PNConnectedCategory");
+              if (statusEvent.category === "PNAccessDeniedCategory") {
+                console.error(
+                  "PubNub Access Denied - check token/permissions:",
+                  statusEvent
+                );
+              }
+            },
+            onError: (errorEvent) => {
+              console.error("PubNub Error Event:", errorEvent);
+              setIsConnected(false);
+            },
           });
-        };
-
-        const typingEndHandler = (channel: string, sender: string) => {
-          if (!channel || sender === userId) {
-            return;
-          }
-
-          setTypingUsers((prev) => {
-            // If we don't have this channel in state, nothing to do
-            if (!prev[channel]) {
-              return prev;
-            }
-
-            // Copy the current typing users for this channel
-            const channelTypers = [...prev[channel]];
-
-            // Filter out the user who stopped typing
-            const updatedTypers = channelTypers.filter(
-              (user) => user.id !== sender
-            );
-
-            // If nothing changed, return the same state
-            if (updatedTypers.length === channelTypers.length) {
-              return prev;
-            }
-
-            // Create a completely new object to ensure React detects the change
-            return {
-              ...prev,
-              [channel]: updatedTypers,
-            };
-          });
-        };
-
-        const presenceHandler = (event: PresenceEvent) => {
-          const { channel, occupancy } = event;
-          if (typeof occupancy === "number") {
-            setPresence((prev) => ({
-              ...prev,
-              [channel]: occupancy,
-            }));
-          }
-        };
-
-        const errorHandler = (statusEvent: StatusEvent) => {
-          console.error("PubNub error:", statusEvent);
+        } else {
           setIsConnected(false);
-        };
+        }
+      };
+      init();
+    } else if (!userId && initializedUserId.current) {
+      console.log("PubNubProvider: Cleaning up service due to user logout.");
+      pubnubService.cleanup();
+      setClientInstance(null);
+      setIsInitialized(false);
+      setIsConnected(false);
+      setTypingUsers({});
+      setPresence({});
+      setCurrentUserNameState(null);
+      setMessagesByChannel({});
+      receivedMessageIds.current.clear();
+      initializedUserId.current = null;
+    }
+  }, [userId]);
 
-        // Setup listeners with explicit function references
-        pubnubClient.setupListeners({
-          onMessage: messageHandler,
-          onTypingStart: typingStartHandler,
-          onTypingEnd: typingEndHandler,
-          onPresence: presenceHandler,
-          onError: errorHandler,
-        });
+  const startTyping = useCallback((channel: string) => {
+    pubnubService.sendTypingStart(channel);
+  }, []);
 
-        setIsConnected(true);
-      } catch (error) {
-        console.error("Failed to initialize PubNub:", error);
-        setIsInitialized(false);
-        setIsConnected(false);
-      } finally {
-        isInitializing.current = false;
-      }
-    };
+  const stopTyping = useCallback((channel: string) => {
+    pubnubService.sendTypingEnd(channel);
+  }, []);
 
-    initPubNub();
+  const subscribe = useCallback((channels: string[]) => {
+    pubnubService.subscribe(channels);
+  }, []);
 
-    // Cleanup
-    return () => {
-      pubnubClient.cleanup();
-      isInitializing.current = false;
-    };
-  }, [userId, currentUserName]);
+  const unsubscribe = useCallback((channels: string[]) => {
+    pubnubService.unsubscribe(channels);
+  }, []);
 
-  // Helper to start typing - memoized to prevent recreation
-  const startTyping = useCallback(
-    (channel: string) => {
-      // Check PubNub initialization explicitly
-      if (!isInitialized || !userId || !pubnubClient.getClient()) {
-        return;
-      }
+  const handleSetUserName = useCallback((name: string) => {
+    setCurrentUserNameState(name);
+    pubnubService.userName = name;
+  }, []);
 
-      // Ensure we pass the current userName
-      pubnubClient.sendTypingStart(channel, currentUserName || undefined);
+  const getMessagesForChannel = useCallback(
+    (channelId: string): Message[] => {
+      return messagesByChannel[channelId] || [];
     },
-    [isInitialized, userId, currentUserName]
+    [messagesByChannel]
   );
 
-  // Helper to stop typing - memoized to prevent recreation
-  const stopTyping = useCallback(
-    (channel: string) => {
-      // Check PubNub initialization explicitly
-      if (!isInitialized || !userId || !pubnubClient.getClient()) {
-        return;
-      }
-
-      pubnubClient.sendTypingEnd(channel);
-    },
-    [isInitialized, userId]
-  );
-
-  // Helper to subscribe to a single channel
-  const subscribeTo = useCallback(
-    (channel: string) => {
-      if (isInitialized) {
-        pubnubClient.subscribe([channel]);
-      }
-    },
-    [isInitialized]
-  );
-
-  // Helper to unsubscribe from a single channel
-  const unsubscribeFrom = useCallback(
-    (channel: string) => {
-      if (isInitialized) {
-        pubnubClient.unsubscribe([channel]);
-      }
-    },
-    [isInitialized]
-  );
-
-  // Update userName handler
-  const handleSetUserName = useCallback(
-    (name: string) => {
-      setCurrentUserName(name);
-      if (isInitialized) {
-        pubnubClient.setUserName(name);
-      }
-    },
-    [isInitialized]
-  );
-
-  // Context value with additional helpers
-  const contextValue = {
+  const contextValue: PubNubContextType = {
+    client: clientInstance,
     isInitialized,
     isConnected,
     typingUsers,
     startTyping,
     stopTyping,
     presence,
-    subscribeTo,
-    unsubscribeFrom,
+    subscribe,
+    unsubscribe,
     currentUserName,
     setCurrentUserName: handleSetUserName,
+    userId: pubnubService.userId,
+    messagesByChannel,
+    getMessagesForChannel,
   };
 
-  // Don't render anything until we're initialized or explicitly not logged in
-  if (!client && userId) {
-    return (
-      <div className="flex justify-center items-center h-screen">
-        <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-primary"></div>
-      </div>
-    );
-  }
-
-  // Use a default client if not initialized
   const fallbackClient = new PubNub({
     publishKey: "demo",
     subscribeKey: "demo",
@@ -319,7 +303,7 @@ export const PubNubProvider: React.FC<PubNubProviderProps> = ({
 
   return (
     <PubNubContext.Provider value={contextValue}>
-      <Provider client={client || fallbackClient}>{children}</Provider>
+      <Provider client={clientInstance || fallbackClient}>{children}</Provider>
     </PubNubContext.Provider>
   );
 };

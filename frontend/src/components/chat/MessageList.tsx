@@ -1,14 +1,8 @@
 import { useEffect, useRef, useMemo } from "react";
 import { usePubNubContext } from "../providers/PubNubProvider";
+import { Message } from "../../types"; // Import shared type
 
-interface Message {
-  id?: string;
-  sender: string;
-  sender_id: string;
-  content: string;
-  timestamp: number;
-  type?: string;
-}
+// Removed local Message interface definition
 
 interface MessageListProps {
   channelId: string | null;
@@ -48,13 +42,13 @@ export function MessageList({
     });
   };
 
-  // Deduplicate messages by content and sender
+  // Deduplicate messages by content and sender ID
   const deduplicatedMessages = messages.reduce((unique: Message[], message) => {
     // Check if this message (by content+sender+timestamp within 2 seconds) is already in our unique list
     const isDuplicate = unique.some(
       (m) =>
-        m.content === message.content &&
-        m.sender_id === message.sender_id &&
+        m.message === message.message && // Use m.message
+        m.sender.id === message.sender.id && // Use m.sender.id
         Math.abs(m.timestamp - message.timestamp) < 2
     );
 
@@ -127,13 +121,14 @@ export function MessageList({
       ) : (
         <>
           {deduplicatedMessages.map((message, index) => {
-            const isCurrentUser = message.sender_id === currentUserId;
+            // Check sender using sender object ID
+            const isCurrentUser = message.sender.id === currentUserId;
 
             return (
               <div
                 key={
                   message.id ||
-                  `${message.sender}-${message.timestamp}-${index}`
+                  `${message.sender.id}-${message.timestamp}-${index}` // Use sender.id in key
                 }
                 className={`flex ${
                   isCurrentUser ? "justify-end" : "justify-start"
@@ -148,10 +143,11 @@ export function MessageList({
                 >
                   {!isCurrentUser && (
                     <div className="font-bold text-xs text-black mb-1">
-                      {message.sender}
+                      {message.sender.name} {/* Display sender name */}
                     </div>
                   )}
-                  <div className="break-words">{message.content}</div>
+                  <div className="break-words">{message.message}</div>{" "}
+                  {/* Display message content */}
                   <div className="text-xs opacity-70 text-right mt-1">
                     {formatTime(message.timestamp)}
                   </div>
