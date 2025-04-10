@@ -75,6 +75,8 @@ class PubNubService {
   private currentListener: ListenerParameters | null = null;
   private isInitialized = false;
   private isInitializing = false; // Prevent race conditions
+  private tokenRefreshTimeoutId: ReturnType<typeof setTimeout> | null = null;
+  private isRefreshing = false; // Prevent concurrent refreshes
 
   private constructor() {
     if (!PUBNUB_PUBLISH_KEY || !PUBNUB_SUBSCRIBE_KEY) {
@@ -162,6 +164,103 @@ class PubNubService {
     }
   }
 
+  /** Parses token, calculates expiry from t+ttl, schedules refresh */
+  private scheduleTokenRefresh(token: string): void {
+    // Clear any pending refresh
+    if (this.tokenRefreshTimeoutId) {
+      clearTimeout(this.tokenRefreshTimeoutId);
+      this.tokenRefreshTimeoutId = null;
+    }
+
+    if (!this.pubnub) {
+      this.warn(
+        "Cannot schedule token refresh: PubNub instance not available."
+      );
+      return;
+    }
+
+    try {
+      const parsedToken = this.pubnub.parseToken(token);
+      this.log("Parsed token for scheduling refresh:", parsedToken);
+
+      const parsedTokenAny = parsedToken as any;
+      const issuedAtTimestampSec = parsedTokenAny?.timestamp; // Issued at (seconds)
+      const timeToLiveMinutes = parsedTokenAny?.ttl; // TTL (minutes)
+
+      if (
+        typeof issuedAtTimestampSec !== "number" ||
+        typeof timeToLiveMinutes !== "number"
+      ) {
+        this.warn(
+          "Could not parse issuance time (t) or TTL (ttl) from token. Proactive refresh disabled.",
+          { payload: parsedToken }
+        );
+        return; // Cannot schedule without t and ttl
+      }
+
+      // Calculate expiration timestamp (seconds)
+      const expirationTimestampSec =
+        issuedAtTimestampSec + timeToLiveMinutes * 60;
+      const expirationTimeMillis = expirationTimestampSec * 1000;
+      const refreshBufferMillis = 5000; // 5 seconds buffer
+      const currentTimeMillis = Date.now();
+
+      const delay =
+        expirationTimeMillis - currentTimeMillis - refreshBufferMillis;
+
+      this.log(
+        `Token expires at ${new Date(
+          expirationTimeMillis
+        ).toISOString()}. Scheduling refresh in ${Math.round(delay / 1000)}s.`
+      );
+
+      if (delay > 0) {
+        this.tokenRefreshTimeoutId = setTimeout(async () => {
+          this.log("Scheduled token refresh triggered.");
+          await this.refreshToken();
+        }, delay);
+      } else {
+        this.warn(
+          "Token is already expired or expiring very soon. Triggering immediate refresh."
+        );
+        // Use Promise.resolve().then() to avoid blocking current execution stack
+        Promise.resolve().then(() => this.refreshToken());
+      }
+    } catch (error) {
+      this.error("Failed to parse token or schedule refresh:", error);
+    }
+  }
+
+  /** Fetches and applies a new token, then schedules the next refresh */
+  private async refreshToken(): Promise<void> {
+    if (this.isRefreshing) {
+      this.log("Token refresh already in progress.");
+      return;
+    }
+    if (!this.pubnub || !this.currentUserId) {
+      this.warn(
+        "Cannot refresh token: PubNub instance or UserID not available."
+      );
+      return;
+    }
+
+    this.log("Attempting to refresh PAM token...");
+    this.isRefreshing = true;
+
+    try {
+      const newToken = await this.fetchPamToken();
+      this.pubnub.setToken(newToken);
+      this.log("Successfully refreshed and applied new PAM token.");
+      // Schedule the *next* refresh based on the new token
+      this.scheduleTokenRefresh(newToken);
+    } catch (error) {
+      this.error("Failed to refresh PAM token:", error);
+      // Consider adding more robust error handling/retry logic here if needed
+    } finally {
+      this.isRefreshing = false;
+    }
+  }
+
   /** Cleans up only partially initialized state on init failure */
   private cleanupPartialInit(): void {
     this.pubnub = null;
@@ -177,6 +276,10 @@ class PubNubService {
     if (this.pubnub) {
       this.removeListener();
       this.unsubscribeAll();
+    }
+    if (this.tokenRefreshTimeoutId) {
+      clearTimeout(this.tokenRefreshTimeoutId);
+      this.tokenRefreshTimeoutId = null;
     }
     this.typingTimeouts.forEach(clearTimeout);
     this.typingTimeouts.clear();
@@ -217,6 +320,7 @@ class PubNubService {
         this.log("Refreshed PAM token on existing client.");
         this.isInitialized = true; // Ensure flag is set
         this.isInitializing = false;
+        this.scheduleTokenRefresh(pamToken);
         return this.pubnub;
       } catch (tokenError) {
         this.error("Failed to refresh token for existing client:", tokenError);
@@ -243,6 +347,7 @@ class PubNubService {
       const pamToken = await this.fetchPamToken();
       this.pubnub.setToken(pamToken);
       this.log("PAM token applied.");
+      this.scheduleTokenRefresh(pamToken);
 
       this.isInitialized = true;
       this.isInitializing = false;
@@ -437,6 +542,14 @@ class PubNubService {
   ): void {
     this.log("Status Event:", event);
     callbacks.onStatus?.(event);
+
+    if (event.category === "PNAccessDeniedCategory") {
+      this.warn(
+        `Received Access Denied (Category: ${event.category}). Assuming token expired or invalid. Triggering refresh.`,
+        { statusEvent: event }
+      );
+      setTimeout(() => this.refreshToken(), 500); // 500ms delay
+    }
 
     // Example: Trigger onError for specific critical categories
     if (
